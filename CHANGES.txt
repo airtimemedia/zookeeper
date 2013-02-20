@@ -1,3 +1,10 @@
+Cherry-picked from Release 3.5.0 - 8/4/2014
+
+BUGFIXES:
+
+  ZOOKEEPER-1643. Windows: fetch_and_add not 64bit-compatible, may not be
+  correct (Erik Anderson via michim)
+
 Release 3.4.6 - 2014-03-10 
 
 Backward compatible changes:
