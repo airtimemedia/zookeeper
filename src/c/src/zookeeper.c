@@ -1644,6 +1644,10 @@ int zookeeper_interest(zhandle_t *zh, int *fd, int *interest,
     if (zh->fd != -1) {
         int idle_recv = calculate_interval(&zh->last_recv, &now);
         int idle_send = calculate_interval(&zh->last_send, &now);
+        // only count time during which we were expecting a response to a send against the recv_timeout
+        if (idle_send < idle_recv) {
+          idle_recv = idle_send;
+        }
         int recv_to = zh->recv_timeout*2/3 - idle_recv;
         int send_to = zh->recv_timeout/3;
         // have we exceeded the receive timeout threshold?
