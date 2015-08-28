@@ -383,7 +383,10 @@ void *do_io(void *v)
             maxfd=2;
         }
         timeout=tv.tv_sec * 1000 + (tv.tv_usec/1000);
-        
+
+// TODO(Art): Temporary
+LOG_DEBUG(("polling fd=%d, events=0x%X, timeout=%lld", fd, fds[1].events, timeout));
+
         poll(fds,maxfd,timeout);
         if (fd != -1) {
             interest=(fds[1].revents&POLLIN)?ZOOKEEPER_READ:0;
@@ -435,6 +438,10 @@ void *do_io(void *v)
            while(recv(adaptor_threads->self_pipe[0],b,sizeof(b), 0)==sizeof(b)){}
        }
 #endif
+
+// TODO(Art): Temporary
+LOG_DEBUG(("processing interest=0x%X", interest));
+
         // dispatch zookeeper events
         rc = zookeeper_process(zh, interest);
         // check the current state of the zhandle and terminate 
