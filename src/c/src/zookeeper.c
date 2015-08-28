@@ -1652,7 +1652,7 @@ int time_left = calculate_interval(&zh->next_deadline, &now);
 LOG_DEBUG(("next_deadline=%d now=%d time_left=%d idle_recv=%d idle_send=%d recv_to=%d send_to=%d",
             zh->next_deadline.tv_sec*1000 + zh->next_deadline.tv_usec/1000,
             now.tv_sec*1000 + now.tv_usec/1000,
-            time_left, idle_recv, idle_send, recv_to, send_to));
+            time_left, idle_recv, idle_send, recv_to, zh->recv_timeout/3 - idle_send));
 
         // have we exceeded the receive timeout threshold?
         if (recv_to <= 0) {
