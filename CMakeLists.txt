@@ -1,4 +1,5 @@
-# Copyright Airtime Media 2015
+# Copyright Airtime Media 2021
+project(at_zookeeper_c)
 
 set(ZK_C_API_SOURCES
   # headers
@@ -40,8 +41,8 @@ target_compile_definitions(at_zookeeper_c PUBLIC
 )
 
 target_include_directories(at_zookeeper_c
-  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/zookeeper/src/c/include
-  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/generated
+  PUBLIC ${PROJECT_SOURCE_DIR}/zookeeper/src/c/include
+  PUBLIC ${PROJECT_SOURCE_DIR}/generated
 )
 
 target_link_libraries(at_zookeeper_c LINK_PUBLIC
