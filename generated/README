@@ -1,0 +1,18 @@
+Files in this directory are hand-generated
+
+---------------------------------------
+- zookeeper.jute.h zookeeper.jute.c
+
+cd at-deps/third_party/zookeeper/zookeeper
+ant compile_jute
+
+Note: You need to have ant installed.
+
+---------------------------------------
+- config.h
+
+cd at-deps/third_party/zookeeper/zookeeper/src/c
+autoreconf -if
+./configure
+
+Note: You need to have cppunit installed.
