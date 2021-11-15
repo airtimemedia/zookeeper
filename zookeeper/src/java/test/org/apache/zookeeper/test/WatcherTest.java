@@ -30,6 +30,7 @@ import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.TestableZooKeeper;
 import org.apache.zookeeper.WatchedEvent;
+import org.apache.zookeeper.Watcher;
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.AsyncCallback.StatCallback;
 import org.apache.zookeeper.AsyncCallback.VoidCallback;
@@ -44,7 +45,7 @@ import org.junit.Test;
 public class WatcherTest extends ClientBase {
     protected static final Logger LOG = LoggerFactory.getLogger(WatcherTest.class);
 
-    private final static class MyStatCallback implements StatCallback {
+    private final class MyStatCallback implements StatCallback {
         int rc;
         public void processResult(int rc, String path, Object ctx, Stat stat) {
             ((int[])ctx)[0]++;
@@ -139,7 +140,7 @@ public class WatcherTest extends ClientBase {
     }
 
     @Test
-    public void testWatcherCount()
+    public void testWatcherCount() 
     throws IOException, InterruptedException, KeeperException {
         ZooKeeper zk1 = null, zk2 = null;
         try {
@@ -194,7 +195,8 @@ public class WatcherTest extends ClientBase {
            zk.exists("/test", watches[i], cbs[i], count);
        }
        zk.exists("/test", false);
-       Assert.assertTrue("Failed to pause the connection!", zk.pauseCnxn(3000));
+       zk.pauseCnxn(3000);
+       Thread.sleep(50);
        zk2.close();
        stopServer();
        watches[0].waitForDisconnected(60000);
@@ -220,7 +222,7 @@ public class WatcherTest extends ClientBase {
        Assert.assertEquals(COUNT, count[0]);
        zk.close();
     }
-
+    
     final int TIMEOUT = 5000;
 
     @Test

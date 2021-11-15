@@ -235,6 +235,7 @@ public class LeaderElectionSupport implements Watcher {
 
   private void becomeReady(LeaderOffer neighborLeaderOffer)
       throws KeeperException, InterruptedException {
+    dispatchEvent(EventType.READY_START);
 
     logger.info("{} not elected leader. Watching node:{}",
         leaderOffer.getNodePath(), neighborLeaderOffer.getNodePath());
@@ -246,7 +247,6 @@ public class LeaderElectionSupport implements Watcher {
     Stat stat = zooKeeper.exists(neighborLeaderOffer.getNodePath(), this);
 
     if (stat != null) {
-      dispatchEvent(EventType.READY_START);
       logger.debug(
           "We're behind {} in line and they're alive. Keeping an eye on them.",
           neighborLeaderOffer.getNodePath());

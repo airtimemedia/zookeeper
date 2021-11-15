@@ -18,7 +18,6 @@
 
 package org.apache.zookeeper.server;
 
-import java.io.File;
 import java.net.InetSocketAddress;
 import java.util.Arrays;
 
@@ -37,9 +36,8 @@ public class ServerConfig {
     //// to update the "conf" 4letter word
     ////
     protected InetSocketAddress clientPortAddress;
-    protected InetSocketAddress secureClientPortAddress;
-    protected File dataDir;
-    protected File dataLogDir;
+    protected String dataDir;
+    protected String dataLogDir;
     protected int tickTime = ZooKeeperServer.DEFAULT_TICK_TIME;
     protected int maxClientCnxns;
     /** defaults to -1 if not set explicitly */
@@ -60,7 +58,7 @@ public class ServerConfig {
         }
 
         clientPortAddress = new InetSocketAddress(Integer.parseInt(args[0]));
-        dataDir = new File(args[1]);
+        dataDir = args[1];
         dataLogDir = dataDir;
         if (args.length == 3) {
             tickTime = Integer.parseInt(args[2]);
@@ -90,24 +88,20 @@ public class ServerConfig {
      * @param config
      */
     public void readFrom(QuorumPeerConfig config) {
-        clientPortAddress = config.getClientPortAddress();
-        secureClientPortAddress = config.getSecureClientPortAddress();
-        dataDir = config.getDataDir();
-        dataLogDir = config.getDataLogDir();
-        tickTime = config.getTickTime();
-        maxClientCnxns = config.getMaxClientCnxns();
-        minSessionTimeout = config.getMinSessionTimeout();
-        maxSessionTimeout = config.getMaxSessionTimeout();
+      clientPortAddress = config.getClientPortAddress();
+      dataDir = config.getDataDir();
+      dataLogDir = config.getDataLogDir();
+      tickTime = config.getTickTime();
+      maxClientCnxns = config.getMaxClientCnxns();
+      minSessionTimeout = config.getMinSessionTimeout();
+      maxSessionTimeout = config.getMaxSessionTimeout();
     }
 
     public InetSocketAddress getClientPortAddress() {
         return clientPortAddress;
     }
-    public InetSocketAddress getSecureClientPortAddress() {
-        return secureClientPortAddress;
-    }
-    public File getDataDir() { return dataDir; }
-    public File getDataLogDir() { return dataLogDir; }
+    public String getDataDir() { return dataDir; }
+    public String getDataLogDir() { return dataLogDir; }
     public int getTickTime() { return tickTime; }
     public int getMaxClientCnxns() { return maxClientCnxns; }
     /** minimum session timeout in milliseconds, -1 if unset */

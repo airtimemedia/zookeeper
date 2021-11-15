@@ -18,6 +18,7 @@
 
 package org.apache.zookeeper.server;
 
+import java.io.ByteArrayInputStream;
 import java.io.EOFException;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -27,6 +28,7 @@ import java.util.zip.Adler32;
 import java.util.zip.Checksum;
 
 import org.apache.jute.BinaryInputArchive;
+import org.apache.jute.InputArchive;
 import org.apache.jute.Record;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -26,7 +26,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.zookeeper.common.Time;
 import org.apache.jute.BinaryInputArchive;
 import org.apache.jute.BinaryOutputArchive;
 import org.apache.jute.Record;
@@ -48,8 +47,6 @@ import org.apache.zookeeper.server.ZooKeeperServer;
 import org.apache.zookeeper.server.persistence.FileHeader;
 import org.apache.zookeeper.server.persistence.FileTxnLog;
 import org.apache.zookeeper.server.persistence.FileTxnSnapLog;
-import org.apache.zookeeper.server.persistence.Util;
-import org.apache.zookeeper.server.persistence.FileTxnLog.FileTxnIterator;
 import org.apache.zookeeper.server.persistence.TxnLog.TxnIterator;
 import org.apache.zookeeper.txn.CreateTxn;
 import org.apache.zookeeper.txn.DeleteTxn;
@@ -68,7 +65,7 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
     protected static final Logger LOG = LoggerFactory.getLogger(LoadFromLogTest.class);
 
     // setting up the quorum has a transaction overhead for creating and closing the session
-    private static final int TRANSACTION_OVERHEAD = 2;
+    private static final int TRANSACTION_OVERHEAD = 2;	
     private static final int TOTAL_TRANSACTIONS = NUM_MESSAGES + TRANSACTION_OVERHEAD;
     private volatile boolean connected;
 
@@ -108,14 +105,6 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
         FileTxnLog txnLog = new FileTxnLog(logDir);
 
         TxnIterator itr = txnLog.read(0);
-        
-        // Check that storage space return some value
-        FileTxnIterator fileItr = (FileTxnIterator) itr;
-        long storageSize = fileItr.getStorageSize();
-        LOG.info("Txnlog size: " + storageSize + " bytes");
-        Assert.assertTrue("Storage size is greater than zero ",
-                (storageSize > 0));
-        
         long expectedZxid = 0;
         long lastZxid = 0;
         TxnHeader hdr;
@@ -126,88 +115,17 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
             Assert.assertTrue("excepting next transaction. expected=" + expectedZxid + ", retreived=" + hdr.getZxid(), (hdr.getZxid() == expectedZxid));
             lastZxid = hdr.getZxid();
         }while(itr.next());
-
+	
         Assert.assertTrue("processed all transactions. " + expectedZxid + " == " + TOTAL_TRANSACTIONS, (expectedZxid == TOTAL_TRANSACTIONS));
         zks.shutdown();
     }
 
-    /**
-     * test that we fail to load txnlog of a request zxid that is older
-     * than what exist on disk
-     * @throws Exception an exception might be thrown here
-     */
-    @Test
-    public void testLoadFailure() throws Exception {
-        // setup a single server cluster
-        File tmpDir = ClientBase.createTmpDir();
-        ClientBase.setupTestEnv();
-        ZooKeeperServer zks = new ZooKeeperServer(tmpDir, tmpDir, 3000);
-        // So we have at least 4 logs
-        SyncRequestProcessor.setSnapCount(50);
-        final int PORT = Integer.parseInt(HOSTPORT.split(":")[1]);
-        ServerCnxnFactory f = ServerCnxnFactory.createFactory(PORT, -1);
-        f.startup(zks);
-        Assert.assertTrue("waiting for server being up ",
-                ClientBase.waitForServerUp(HOSTPORT,CONNECTION_TIMEOUT));
-        ZooKeeper zk = new ZooKeeper(HOSTPORT, CONNECTION_TIMEOUT, this);
 
-        // generate some transactions that will get logged
-        try {
-            for (int i = 0; i< NUM_MESSAGES; i++) {
-                zk.create("/data-", new byte[0], Ids.OPEN_ACL_UNSAFE,
-                        CreateMode.PERSISTENT_SEQUENTIAL);
-            }
-        } finally {
-            zk.close();
-        }
-        f.shutdown();
-        Assert.assertTrue("waiting for server to shutdown",
-                ClientBase.waitForServerDown(HOSTPORT, CONNECTION_TIMEOUT));
 
-        File logDir = new File(tmpDir, FileTxnSnapLog.version + FileTxnSnapLog.VERSION);
-        File[] logFiles = FileTxnLog.getLogFiles(logDir.listFiles(), 0);
-        // Verify that we have at least 4 txnlog
-        Assert.assertTrue(logFiles.length > 4);
-        // Delete the first log file, so we will fail to read it back from disk
-        Assert.assertTrue("delete the first log file", logFiles[0].delete());
-
-        // Find zxid for the second log
-        long secondStartZxid = Util.getZxidFromName(logFiles[1].getName(), "log");
-
-        FileTxnLog txnLog = new FileTxnLog(logDir);
-        TxnIterator itr = txnLog.read(1, false);
-
-        // Oldest log is already remove, so this should point to the start of
-        // of zxid on the second log
-        Assert.assertEquals(secondStartZxid, itr.getHeader().getZxid());
-
-        itr = txnLog.read(secondStartZxid, false);
-        Assert.assertEquals(secondStartZxid, itr.getHeader().getZxid());
-        Assert.assertTrue(itr.next());
-
-        // Trying to get a second txn on second txnlog give us the
-        // the start of second log, since the first one is removed
-        long nextZxid = itr.getHeader().getZxid();
-
-        itr = txnLog.read(nextZxid, false);
-        Assert.assertEquals(secondStartZxid, itr.getHeader().getZxid());
-
-        // Trying to get a first txn on the third give us the
-        // the start of second log, since the first one is removed
-        long thirdStartZxid = Util.getZxidFromName(logFiles[2].getName(), "log");
-        itr = txnLog.read(thirdStartZxid, false);
-        Assert.assertEquals(secondStartZxid, itr.getHeader().getZxid());
-        Assert.assertTrue(itr.next());
-
-        nextZxid = itr.getHeader().getZxid();
-        itr = txnLog.read(nextZxid, false);
-        Assert.assertEquals(secondStartZxid, itr.getHeader().getZxid());
-
-    }
 
     public void process(WatchedEvent event) {
     	switch (event.getType()) {
-    	case None:
+    	case None:   
     		switch (event.getState()) {
     		case SyncConnected:
     			connected = true;
@@ -215,7 +133,7 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
     		case Disconnected:
     			connected = false;
     			break;
-    		default:
+    		default:   
     			break;
     		}
         	break;
@@ -237,7 +155,7 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
         dt.createNode("/test", new byte[0], null, 0, -1, 1, 1);
         for (count = 1; count <= 3; count++) {
             dt.createNode("/test/" + count, new byte[0], null, 0, -1, count,
-                    Time.currentElapsedTime());
+                    System.currentTimeMillis());
         }
         DataNode zk = dt.getNode("/test");
 
@@ -248,11 +166,11 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
         LOG.info("Attempting to create " + "/test/" + (count - 1));
         doOp(logFile, OpCode.create, "/test/" + (count - 1), dt, zk,
                 zk.stat.getCversion() + 1);
-
+        
         LOG.info("Attempting to create " + "/test/" + (count - 1));
         doOp(logFile, OpCode.multi, "/test/" + (count - 1), dt, zk,
                 zk.stat.getCversion() + 1);
-
+        
         LOG.info("Attempting to create " + "/test/" + (count - 1));
         doOp(logFile, OpCode.multi, "/test/" + (count - 1), dt, zk,
                 -1);
@@ -274,28 +192,28 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
         int prevCversion = parent.stat.getCversion();
         long prevPzxid = parent.stat.getPzxid();
         List<String> child = dt.getChildren(parentName, null, null);
-        StringBuilder childStr = new StringBuilder();
+        String childStr = "";
         for (String s : child) {
-            childStr.append(s).append(" ");
+            childStr += s + " ";
         }
         LOG.info("Children: " + childStr + " for " + parentName);
         LOG.info("(cverions, pzxid): " + prevCversion + ", " + prevPzxid);
-
+        
         Record txn = null;
         TxnHeader txnHeader = null;
         if (type == OpCode.delete) {
             txn = new DeleteTxn(path);
             txnHeader = new TxnHeader(0xabcd, 0x123, prevPzxid + 1,
-                Time.currentElapsedTime(), OpCode.delete);
+                System.currentTimeMillis(), OpCode.delete);
         } else if (type == OpCode.create) {
             txnHeader = new TxnHeader(0xabcd, 0x123, prevPzxid + 1,
-                    Time.currentElapsedTime(), OpCode.create);
+                    System.currentTimeMillis(), OpCode.create);
             txn = new CreateTxn(path, new byte[0], null, false, cversion);
         }
         else if (type == OpCode.multi) {
             txnHeader = new TxnHeader(0xabcd, 0x123, prevPzxid + 1,
-                    Time.currentElapsedTime(), OpCode.create);
-            txn = new CreateTxn(path, new byte[0], null, false, cversion);
+                    System.currentTimeMillis(), OpCode.create);
+            txn = new CreateTxn(path, new byte[0], null, false, cversion);                       
             ArrayList txnList = new ArrayList();
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             BinaryOutputArchive boa = BinaryOutputArchive.getArchive(baos);
@@ -305,16 +223,16 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
             txnList.add(txact);
             txn = new MultiTxn(txnList);
             txnHeader = new TxnHeader(0xabcd, 0x123, prevPzxid + 1,
-                    Time.currentElapsedTime(), OpCode.multi);
+                    System.currentTimeMillis(), OpCode.multi);
         }
         logFile.processTransaction(txnHeader, dt, null, txn);
 
         int newCversion = parent.stat.getCversion();
         long newPzxid = parent.stat.getPzxid();
         child = dt.getChildren(parentName, null, null);
-        childStr = new StringBuilder();
+        childStr = "";
         for (String s : child) {
-            childStr.append(s).append(" ");
+            childStr += s + " ";
         }
         LOG.info("Children: " + childStr + " for " + parentName);
         LOG.info("(cverions, pzxid): " +newCversion + ", " + newPzxid);
@@ -332,7 +250,7 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
         File tmpDir = ClientBase.createTmpDir();
         FileTxnLog txnLog = new FileTxnLog(tmpDir);
         TxnHeader txnHeader = new TxnHeader(0xabcd, 0x123, 0x123,
-              Time.currentElapsedTime(), OpCode.create);
+              System.currentTimeMillis(), OpCode.create);
         Record txn = new CreateTxn("/Test", new byte[0], null, false, 1);
         txnLog.append(txnHeader, txn);
         FileInputStream in = new FileInputStream(tmpDir.getPath() + "/log." +
@@ -345,10 +263,10 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
         Assert.assertTrue("Missing magic number ",
               header.getMagic() == FileTxnLog.TXNLOG_MAGIC);
     }
-
+    
     /**
      * Test we can restore the snapshot that has data ahead of the zxid
-     * of the snapshot file.
+     * of the snapshot file. 
      */
     @Test
     public void testRestore() throws Exception {
@@ -363,7 +281,6 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
 		Assert.assertTrue("waiting for server being up ", ClientBase
 				.waitForServerUp(HOSTPORT, CONNECTION_TIMEOUT));
         ZooKeeper zk = getConnectedZkClient();
-
 		// generate some transactions
 		String lastPath = null;
 		try {
@@ -404,8 +321,7 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
 		Assert.assertTrue("Restore failed expected zxid=" + eZxid + " found="
 				+ fZxid, fZxid == eZxid);
         zk = getConnectedZkClient();
-
-		// Verify correctness of data and whether sequential znode creation
+		// Verify correctness of data and whether sequential znode creation 
 		// proceeds correctly after this point
 		String[] children;
 		String path;
@@ -424,12 +340,12 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
 				+ " expected " + NUM_MESSAGES,
 				(children.length == NUM_MESSAGES));
 		f.shutdown();
-		zks.shutdown();
+                zks.shutdown();
 	}
-
+    
     /**
      * Test we can restore a snapshot that has errors and data ahead of the zxid
-     * of the snapshot file.
+     * of the snapshot file. 
      */
     @Test
     public void testRestoreWithTransactionErrors() throws Exception {
@@ -444,7 +360,6 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
         Assert.assertTrue("waiting for server being up ", ClientBase
                 .waitForServerUp(HOSTPORT, CONNECTION_TIMEOUT));
         ZooKeeper zk = getConnectedZkClient();
-
         // generate some transactions
         try {
             for (int i = 0; i < NUM_MESSAGES; i++) {
@@ -464,7 +379,7 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
                 zks.getZKDatabase().getDataTreeLastProcessedZxid() - 10);
         LOG.info("Set lastProcessedZxid to "
                 + zks.getZKDatabase().getDataTreeLastProcessedZxid());
-
+        
         // Force snapshot and restore
         zks.takeSnapshot();
         zks.shutdown();
@@ -476,49 +391,9 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
         f.startup(zks);
         Assert.assertTrue("waiting for server being up ", ClientBase
                 .waitForServerUp(HOSTPORT, CONNECTION_TIMEOUT));
-
+        
         f.shutdown();
         zks.shutdown();
-    }
-
-    /**
-     * Verify snap/log dir create with/without autocreate enabled.
-     */
-    @Test
-    public void testDatadirAutocreate() throws Exception {
-        ClientBase.setupTestEnv();
-
-        // first verify the default (autocreate on) works
-        File tmpDir = ClientBase.createTmpDir();
-        ZooKeeperServer zks = new ZooKeeperServer(tmpDir, tmpDir, 3000);
-        final int PORT = Integer.parseInt(HOSTPORT.split(":")[1]);
-        ServerCnxnFactory f = ServerCnxnFactory.createFactory(PORT, -1);
-        f.startup(zks);
-        Assert.assertTrue("waiting for server being up ", ClientBase
-                .waitForServerUp(HOSTPORT, CONNECTION_TIMEOUT));
-        zks.shutdown();
-        f.shutdown();
-        Assert.assertTrue("waiting for server being down ", ClientBase
-                .waitForServerDown(HOSTPORT, CONNECTION_TIMEOUT));
-
-        try {
-            // now verify autocreate off works
-            System.setProperty(FileTxnSnapLog.ZOOKEEPER_DATADIR_AUTOCREATE, "false");
-
-            tmpDir = ClientBase.createTmpDir();
-            zks = new ZooKeeperServer(tmpDir, tmpDir, 3000);
-            f = ServerCnxnFactory.createFactory(PORT, -1);
-            f.startup(zks);
-            Assert.assertTrue("waiting for server being up ", ClientBase
-                    .waitForServerUp(HOSTPORT, CONNECTION_TIMEOUT));
-
-            Assert.fail("Server should not have started without datadir");
-        } catch (IOException e) {
-            LOG.info("Server failed to start - correct behavior " + e);
-        } finally {
-            System.setProperty(FileTxnSnapLog.ZOOKEEPER_DATADIR_AUTOCREATE,
-                FileTxnSnapLog.ZOOKEEPER_DATADIR_AUTOCREATE_DEFAULT);
-        }
     }
 
     /**
@@ -569,9 +444,9 @@ public class LoadFromLogTest extends ZKTestCase implements  Watcher {
     private ZooKeeper getConnectedZkClient() throws IOException {
         ZooKeeper zk = new ZooKeeper(HOSTPORT, CONNECTION_TIMEOUT, this);
 
-        long start = Time.currentElapsedTime();
+        long start = System.currentTimeMillis();
         while (!connected) {
-            long end = Time.currentElapsedTime();
+            long end = System.currentTimeMillis();
             if (end - start > 5000) {
                 Assert.assertTrue("Could not connect with server in 5 seconds",
                         false);

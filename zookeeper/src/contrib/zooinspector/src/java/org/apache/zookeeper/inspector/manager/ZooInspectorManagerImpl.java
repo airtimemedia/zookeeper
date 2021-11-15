@@ -91,9 +91,8 @@ public class ZooInspectorManagerImpl implements ZooInspectorManager {
      */
     public static final String AUTH_DATA_KEY = "authData";
 
-
     private static final File defaultNodeViewersFile = new File(
-            "./config/defaultNodeViewers.cfg");
+            "./config/defaultNodeVeiwers.cfg");
     private static final File defaultConnectionFile = new File(
             "./config/defaultConnectionSettings.cfg");
 

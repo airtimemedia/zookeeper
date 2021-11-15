@@ -54,7 +54,6 @@ import org.slf4j.LoggerFactory;
 
 public class ClientTest extends ClientBase {
     protected static final Logger LOG = LoggerFactory.getLogger(ClientTest.class);
-    private boolean skipACL = System.getProperty("zookeeper.skipACL", "no").equals("yes");
 
     /** Verify that pings are sent, keeping the "idle" client alive */
     @Test
@@ -143,95 +142,27 @@ public class ClientTest extends ClientBase {
                 LOG.info("Test successful, invalid acl received : "
                         + e.getMessage());
             }
+            zk.addAuthInfo("digest", "ben:passwd".getBytes());
+            zk.create("/acltest", new byte[0], Ids.CREATOR_ALL_ACL, CreateMode.PERSISTENT);
+            zk.close();
+            zk = createClient();
+            zk.addAuthInfo("digest", "ben:passwd2".getBytes());
             try {
-                ArrayList<ACL> testACL = new ArrayList<ACL>();
-                testACL.add(new ACL(Perms.ALL | Perms.ADMIN, new Id()));
-                zk.create("/nullidtest", new byte[0], testACL, CreateMode.PERSISTENT);
-                Assert.fail("Should have received an invalid acl error");
-            } catch(InvalidACLException e) {
-                LOG.info("Test successful, invalid acl received : "
-                        + e.getMessage());
+                zk.getData("/acltest", false, new Stat());
+                Assert.fail("Should have received a permission error");
+            } catch (KeeperException e) {
+                Assert.assertEquals(Code.NOAUTH, e.code());
             }
             zk.addAuthInfo("digest", "ben:passwd".getBytes());
-            ArrayList<ACL> testACL = new ArrayList<ACL>();
-            testACL.add(new ACL(Perms.ALL, new Id("auth","")));
-            testACL.add(new ACL(Perms.WRITE, new Id("ip", "127.0.0.1")));
-            zk.create("/acltest", new byte[0], testACL, CreateMode.PERSISTENT);
-            zk.close();
-            zk = createClient();
-            zk.addAuthInfo("digest", "ben:passwd2".getBytes());
-            if (skipACL) {
-                try {
-                    zk.getData("/acltest", false, null);
-                } catch (KeeperException e) {
-                    Assert.fail("Badauth reads should succeed with skipACL.");
-                }
-            } else {
-                try {
-                    zk.getData("/acltest", false, null);
-                    Assert.fail("Should have received a permission error");
-                } catch (KeeperException e) {
-                    Assert.assertEquals(Code.NOAUTH, e.code());
-                }
-            }
-            zk.addAuthInfo("digest", "ben:passwd".getBytes());
-            zk.getData("/acltest", false, null);
+            zk.getData("/acltest", false, new Stat());
             zk.setACL("/acltest", Ids.OPEN_ACL_UNSAFE, -1);
             zk.close();
             zk = createClient();
-            zk.getData("/acltest", false, null);
+            zk.getData("/acltest", false, new Stat());
             List<ACL> acls = zk.getACL("/acltest", new Stat());
             Assert.assertEquals(1, acls.size());
             Assert.assertEquals(Ids.OPEN_ACL_UNSAFE, acls);
-
-            // The stat parameter should be optional.
-            acls = zk.getACL("/acltest", null);
-            Assert.assertEquals(1, acls.size());
-            Assert.assertEquals(Ids.OPEN_ACL_UNSAFE, acls);
-
             zk.close();
-        } finally {
-            if (zk != null) {
-                zk.close();
-            }
-        }
-    }
-
-    @Test
-    public void testNullAuthId() throws Exception {
-        ZooKeeper zk = null;
-        try {
-            zk = createClient();
-            zk.addAuthInfo("digest", "ben:passwd".getBytes());
-            ArrayList<ACL> testACL = new ArrayList<ACL>();
-            testACL.add(new ACL(Perms.ALL, new Id("auth", null)));
-            zk.create("/acltest", new byte[0], testACL, CreateMode.PERSISTENT);
-            zk.close();
-            zk = createClient();
-            zk.addAuthInfo("digest", "ben:passwd2".getBytes());
-            if (skipACL) {
-                try {
-                    zk.getData("/acltest", false, null);
-                } catch (KeeperException e) {
-                    Assert.fail("Badauth reads should succeed with skipACL.");
-                }
-            } else {
-                try {
-                    zk.getData("/acltest", false, null);
-                    Assert.fail("Should have received a permission error");
-                } catch (KeeperException e) {
-                    Assert.assertEquals(Code.NOAUTH, e.code());
-                }
-            }
-            zk.addAuthInfo("digest", "ben:passwd".getBytes());
-            zk.getData("/acltest", false, null);
-            zk.setACL("/acltest", Ids.OPEN_ACL_UNSAFE, -1);
-            zk.close();
-            zk = createClient();
-            zk.getData("/acltest", false, null);
-            List<ACL> acls = zk.getACL("/acltest", new Stat());
-            Assert.assertEquals(1, acls.size());
-            Assert.assertEquals(Ids.OPEN_ACL_UNSAFE, acls);
         } finally {
             if (zk != null) {
                 zk.close();
@@ -842,6 +773,11 @@ public class ClientTest extends ClientBase {
         ReplyHeader r = zk.submitRequest(h, request, response, null);
 
         Assert.assertEquals(r.getErr(), Code.UNIMPLEMENTED.intValue());
-        zk.testableWaitForShutdown(CONNECTION_TIMEOUT);
+
+        try {
+            zk.exists("/m1", false);
+            fail("The connection should have been closed");
+        } catch (KeeperException.ConnectionLossException expected) {
+        }
     }
 }

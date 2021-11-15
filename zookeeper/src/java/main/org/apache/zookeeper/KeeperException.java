@@ -103,10 +103,6 @@ public abstract class KeeperException extends Exception {
                 return new UnimplementedException();
             case OPERATIONTIMEOUT:
                 return new OperationTimeoutException();
-            case NEWCONFIGNOQUORUM:
-               return new NewConfigNoQuorum();
-            case RECONFIGINPROGRESS:
-               return new ReconfigInProgress();
             case BADARGUMENTS:
                 return new BadArgumentsException();
             case APIERROR:
@@ -135,10 +131,7 @@ public abstract class KeeperException extends Exception {
                 return new SessionMovedException();
             case NOTREADONLY:
                 return new NotReadOnlyException();
-            case EPHEMERALONLOCALSESSION:
-                return new EphemeralOnLocalSessionException();
-            case NOWATCHER:
-                return new NoWatcherException();
+            	
             case OK:
             default:
                 throw new IllegalArgumentException("Invalid exception code");
@@ -225,23 +218,6 @@ public abstract class KeeperException extends Exception {
         @Deprecated
         public static final int BadArguments = -8;
 
-        @Deprecated
-        public static final int UnknownSession= -12;
-
-        /**
-         * @deprecated deprecated in 3.1.0, use {@link Code#NEWCONFIGNOQUORUM}
-         * instead
-         */
-        @Deprecated
-        public static final int NewConfigNoQuorum = -13;
-
-        /**
-         * @deprecated deprecated in 3.1.0, use {@link Code#RECONFIGINPROGRESS}
-         * instead
-         */
-        @Deprecated
-        public static final int ReconfigInProgress= -14;
-
         /**
          * @deprecated deprecated in 3.1.0, use {@link Code#APIERROR} instead
          */
@@ -301,13 +277,10 @@ public abstract class KeeperException extends Exception {
          */
         @Deprecated
         public static final int AuthFailed = -115;
-        
-        // This value will be used directly in {@link CODE#SESSIONMOVED}
-        // public static final int SessionMoved = -118;       
-        
-        @Deprecated
-        public static final int EphemeralOnLocalSession = -120;
-
+        /**
+         * This value will be used directly in {@link CODE#SESSIONMOVED}
+         */
+        // public static final int SessionMoved = -118;
     }
 
     /** Codes which represent the various KeeperException
@@ -340,13 +313,6 @@ public abstract class KeeperException extends Exception {
         OPERATIONTIMEOUT (OperationTimeout),
         /** Invalid arguments */
         BADARGUMENTS (BadArguments),
-        /** No quorum of new config is connected and up-to-date with the leader of last commmitted config - try 
-         *  invoking reconfiguration after new servers are connected and synced */
-        NEWCONFIGNOQUORUM (NewConfigNoQuorum),
-        /** Another reconfiguration is in progress -- concurrent reconfigs not supported (yet) */
-        RECONFIGINPROGRESS (ReconfigInProgress),
-        /** Unknown session (internal server use only) */
-        UNKNOWNSESSION (UnknownSession),
         
         /** API errors.
          * This is never thrown by the server, it shouldn't be used other than
@@ -360,8 +326,7 @@ public abstract class KeeperException extends Exception {
         NONODE (NoNode),
         /** Not authenticated */
         NOAUTH (NoAuth),
-        /** Version conflict
-            In case of reconfiguration: reconfig requested from config version X but last seen config has a different version Y */
+        /** Version conflict */
         BADVERSION (BadVersion),
         /** Ephemeral nodes may not have children */
         NOCHILDRENFOREPHEMERALS (NoChildrenForEphemerals),
@@ -380,11 +345,7 @@ public abstract class KeeperException extends Exception {
         /** Session moved to another server, so operation is ignored */
         SESSIONMOVED (-118),
         /** State-changing request is passed to read-only server */
-        NOTREADONLY (-119),
-        /** Attempt to create ephemeral node on a local session */
-        EPHEMERALONLOCALSESSION (EphemeralOnLocalSession),
-        /** Attempts to remove a non-existing watcher */
-        NOWATCHER (-121);
+        NOTREADONLY (-119);
 
         private static final Map<Integer,Code> lookup
             = new HashMap<Integer,Code>();
@@ -429,10 +390,6 @@ public abstract class KeeperException extends Exception {
                 return "ConnectionLoss";
             case MARSHALLINGERROR:
                 return "MarshallingError";
-            case NEWCONFIGNOQUORUM:
-               return "NewConfigNoQuorum";
-            case RECONFIGINPROGRESS:
-               return "ReconfigInProgress";
             case UNIMPLEMENTED:
                 return "Unimplemented";
             case OPERATIONTIMEOUT:
@@ -465,10 +422,6 @@ public abstract class KeeperException extends Exception {
                 return "Session moved";
             case NOTREADONLY:
                 return "Not a read-only call";
-            case EPHEMERALONLOCALSESSION:
-                return "Ephemeral node on local session";
-            case NOWATCHER:
-                return "No such watcher";
             default:
                 return "Unknown error " + code;
         }
@@ -529,7 +482,7 @@ public abstract class KeeperException extends Exception {
      * If this exception was thrown by a multi-request then the (partial) results
      * and error codes can be retrieved using this getter.
      * @return A copy of the list of results from the operations in the multi-request.
-     *
+     * 
      * @since 3.4.0
      *
      */
@@ -637,24 +590,6 @@ public abstract class KeeperException extends Exception {
     }
 
     /**
-     * @see Code#NEWCONFIGNOQUORUM
-     */
-    public static class NewConfigNoQuorum extends KeeperException {
-        public NewConfigNoQuorum() {
-            super(Code.NEWCONFIGNOQUORUM);
-        }
-    }
-    
-    /**
-     * @see Code#RECONFIGINPROGRESS
-     */
-    public static class ReconfigInProgress extends KeeperException {
-        public ReconfigInProgress() {
-            super(Code.RECONFIGINPROGRESS);
-        }
-    }
-    
-    /**
      * @see Code#NOCHILDRENFOREPHEMERALS
      */
     public static class NoChildrenForEphemeralsException extends KeeperException {
@@ -728,16 +663,7 @@ public abstract class KeeperException extends Exception {
             super(Code.SESSIONEXPIRED);
         }
     }
-
-    /**
-     * @see Code#UNKNOWNSESSION
-     */
-    public static class UnknownSessionException extends KeeperException {
-        public UnknownSessionException() {
-            super(Code.UNKNOWNSESSION);
-        }
-    }
-
+    
     /**
      * @see Code#SESSIONMOVED
      */
@@ -757,15 +683,6 @@ public abstract class KeeperException extends Exception {
     }
 
     /**
-     * @see Code#EPHEMERALONLOCALSESSION
-     */
-    public static class EphemeralOnLocalSessionException extends KeeperException {
-        public EphemeralOnLocalSessionException() {
-            super(Code.EPHEMERALONLOCALSESSION);
-        }
-    }
-
-    /**
      * @see Code#SYSTEMERROR
      */
     public static class SystemErrorException extends KeeperException {
@@ -780,19 +697,6 @@ public abstract class KeeperException extends Exception {
     public static class UnimplementedException extends KeeperException {
         public UnimplementedException() {
             super(Code.UNIMPLEMENTED);
-        }
-    }
-
-    /**
-     * @see Code#NOWATCHER
-     */
-    public static class NoWatcherException extends KeeperException {
-        public NoWatcherException() {
-            super(Code.NOWATCHER);
-        }
-
-        public NoWatcherException(String path) {
-            super(Code.NOWATCHER, path);
         }
     }
 }

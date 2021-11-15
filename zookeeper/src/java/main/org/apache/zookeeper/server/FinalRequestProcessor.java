@@ -18,25 +18,21 @@
 
 package org.apache.zookeeper.server;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.List;
+
 import org.apache.jute.Record;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.MultiResponse;
+import org.apache.zookeeper.ZooDefs;
 import org.apache.zookeeper.KeeperException.Code;
 import org.apache.zookeeper.KeeperException.SessionMovedException;
-import org.apache.zookeeper.MultiResponse;
-import org.apache.zookeeper.OpResult;
-import org.apache.zookeeper.OpResult.CheckResult;
-import org.apache.zookeeper.OpResult.CreateResult;
-import org.apache.zookeeper.OpResult.DeleteResult;
-import org.apache.zookeeper.OpResult.ErrorResult;
-import org.apache.zookeeper.OpResult.SetDataResult;
-import org.apache.zookeeper.Watcher.WatcherType;
-import org.apache.zookeeper.ZooDefs;
 import org.apache.zookeeper.ZooDefs.OpCode;
-import org.apache.zookeeper.common.Time;
 import org.apache.zookeeper.data.ACL;
 import org.apache.zookeeper.data.Stat;
-import org.apache.zookeeper.proto.CheckWatchesRequest;
-import org.apache.zookeeper.proto.Create2Response;
 import org.apache.zookeeper.proto.CreateResponse;
 import org.apache.zookeeper.proto.ExistsRequest;
 import org.apache.zookeeper.proto.ExistsResponse;
@@ -48,7 +44,6 @@ import org.apache.zookeeper.proto.GetChildrenRequest;
 import org.apache.zookeeper.proto.GetChildrenResponse;
 import org.apache.zookeeper.proto.GetDataRequest;
 import org.apache.zookeeper.proto.GetDataResponse;
-import org.apache.zookeeper.proto.RemoveWatchesRequest;
 import org.apache.zookeeper.proto.ReplyHeader;
 import org.apache.zookeeper.proto.SetACLResponse;
 import org.apache.zookeeper.proto.SetDataResponse;
@@ -57,16 +52,18 @@ import org.apache.zookeeper.proto.SyncRequest;
 import org.apache.zookeeper.proto.SyncResponse;
 import org.apache.zookeeper.server.DataTree.ProcessTxnResult;
 import org.apache.zookeeper.server.ZooKeeperServer.ChangeRecord;
-import org.apache.zookeeper.server.quorum.QuorumZooKeeperServer;
+import org.apache.zookeeper.txn.CreateSessionTxn;
 import org.apache.zookeeper.txn.ErrorTxn;
 import org.apache.zookeeper.txn.TxnHeader;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.List;
-import java.util.Locale;
+import org.apache.zookeeper.MultiTransactionRecord;
+import org.apache.zookeeper.Op;
+import org.apache.zookeeper.OpResult;
+import org.apache.zookeeper.OpResult.CheckResult;
+import org.apache.zookeeper.OpResult.CreateResult;
+import org.apache.zookeeper.OpResult.DeleteResult;
+import org.apache.zookeeper.OpResult.SetDataResult;
+import org.apache.zookeeper.OpResult.ErrorResult;
 
 /**
  * This Request processor actually applies any transaction associated with a
@@ -100,45 +97,40 @@ public class FinalRequestProcessor implements RequestProcessor {
         }
         ProcessTxnResult rc = null;
         synchronized (zks.outstandingChanges) {
-            // Need to process local session requests
-            rc = zks.processTxn(request);
-
-            // request.hdr is set for write requests, which are the only ones
-            // that add to outstandingChanges.
-            if (request.getHdr() != null) {
-                TxnHeader hdr = request.getHdr();
-                Record txn = request.getTxn();
-                long zxid = hdr.getZxid();
-                while (!zks.outstandingChanges.isEmpty()
-                       && zks.outstandingChanges.get(0).zxid <= zxid) {
-                    ChangeRecord cr = zks.outstandingChanges.remove(0);
-                    if (cr.zxid < zxid) {
-                        LOG.warn("Zxid outstanding " + cr.zxid
-                                 + " is less than current " + zxid);
-                    }
-                    if (zks.outstandingChangesForPath.get(cr.path) == cr) {
-                        zks.outstandingChangesForPath.remove(cr.path);
-                    }
+            while (!zks.outstandingChanges.isEmpty()
+                    && zks.outstandingChanges.get(0).zxid <= request.zxid) {
+                ChangeRecord cr = zks.outstandingChanges.remove(0);
+                if (cr.zxid < request.zxid) {
+                    LOG.warn("Zxid outstanding "
+                            + cr.zxid
+                            + " is less than current " + request.zxid);
+                }
+                if (zks.outstandingChangesForPath.get(cr.path) == cr) {
+                    zks.outstandingChangesForPath.remove(cr.path);
                 }
             }
+            if (request.hdr != null) {
+               TxnHeader hdr = request.hdr;
+               Record txn = request.txn;
 
+               rc = zks.processTxn(hdr, txn);
+            }
             // do not add non quorum packets to the queue.
-            if (request.isQuorum()) {
+            if (Request.isQuorum(request.type)) {
                 zks.getZKDatabase().addCommittedProposal(request);
             }
         }
 
-        // ZOOKEEPER-558:
-        // In some cases the server does not close the connection (e.g., closeconn buffer
-        // was not being queued — ZOOKEEPER-558) properly. This happens, for example,
-        // when the client closes the connection. The server should still close the session, though.
-        // Calling closeSession() after losing the cnxn, results in the client close session response being dropped.
-        if (request.type == OpCode.closeSession && connClosedByClient(request)) {
-            // We need to check if we can close the session id.
-            // Sometimes the corresponding ServerCnxnFactory could be null because
-            // we are just playing diffs from the leader.
-            if (closeSession(zks.serverCnxnFactory, request.sessionId) ||
-                    closeSession(zks.secureServerCnxnFactory, request.sessionId)) {
+        if (request.hdr != null && request.hdr.getType() == OpCode.closeSession) {
+            ServerCnxnFactory scxn = zks.getServerCnxnFactory();
+            // this might be possible since
+            // we might just be playing diffs from the leader
+            if (scxn != null && request.cnxn == null) {
+                // calling this if we have the cnxn results in the client's
+                // close session response being lost - we've already closed
+                // the session/socket here before we can send the closeSession
+                // in the switch block below
+                scxn.closeSession(request.sessionId);
                 return;
             }
         }
@@ -152,21 +144,11 @@ public class FinalRequestProcessor implements RequestProcessor {
         zks.decInProcess();
         Code err = Code.OK;
         Record rsp = null;
+        boolean closeSession = false;
         try {
-            if (request.getHdr() != null && request.getHdr().getType() == OpCode.error) {
-                /*
-                 * When local session upgrading is disabled, leader will
-                 * reject the ephemeral node creation due to session expire.
-                 * However, if this is the follower that issue the request,
-                 * it will have the correct error code, so we should use that
-                 * and report to user
-                 */
-                if (request.getException() != null) {
-                    throw request.getException();
-                } else {
-                    throw KeeperException.create(KeeperException.Code
-                            .get(((ErrorTxn) request.getTxn()).getErr()));
-                }
+            if (request.hdr != null && request.hdr.getType() == OpCode.error) {
+                throw KeeperException.create(KeeperException.Code.get((
+                        (ErrorTxn) request.txn).getErr()));
             }
 
             KeeperException ke = request.getException();
@@ -183,7 +165,7 @@ public class FinalRequestProcessor implements RequestProcessor {
 
                 lastOp = "PING";
                 cnxn.updateStatsForResponse(request.cxid, request.zxid, lastOp,
-                        request.createTime, Time.currentElapsedTime());
+                        request.createTime, System.currentTimeMillis());
 
                 cnxn.sendResponse(new ReplyHeader(-2,
                         zks.getZKDatabase().getDataTreeLastProcessedZxid(), 0), null, "response");
@@ -194,7 +176,7 @@ public class FinalRequestProcessor implements RequestProcessor {
 
                 lastOp = "SESS";
                 cnxn.updateStatsForResponse(request.cxid, request.zxid, lastOp,
-                        request.createTime, Time.currentElapsedTime());
+                        request.createTime, System.currentTimeMillis());
 
                 zks.finishSessionInit(request.cnxn, true);
                 return;
@@ -214,12 +196,7 @@ public class FinalRequestProcessor implements RequestProcessor {
                         case OpCode.create:
                             subResult = new CreateResult(subTxnResult.path);
                             break;
-                        case OpCode.create2:
-                        case OpCode.createContainer:
-                            subResult = new CreateResult(subTxnResult.path, subTxnResult.stat);
-                            break;
                         case OpCode.delete:
-                        case OpCode.deleteContainer:
                             subResult = new DeleteResult();
                             break;
                         case OpCode.setData:
@@ -243,15 +220,7 @@ public class FinalRequestProcessor implements RequestProcessor {
                 err = Code.get(rc.err);
                 break;
             }
-            case OpCode.create2:
-            case OpCode.createContainer: {
-                lastOp = "CREA";
-                rsp = new Create2Response(rc.path, rc.stat);
-                err = Code.get(rc.err);
-                break;
-            }
-            case OpCode.delete:
-            case OpCode.deleteContainer: {
+            case OpCode.delete: {
                 lastOp = "DELE";
                 err = Code.get(rc.err);
                 break;
@@ -259,12 +228,6 @@ public class FinalRequestProcessor implements RequestProcessor {
             case OpCode.setData: {
                 lastOp = "SETD";
                 rsp = new SetDataResponse(rc.stat);
-                err = Code.get(rc.err);
-                break;
-            }           
-            case OpCode.reconfig: {
-                lastOp = "RECO";               
-                rsp = new GetDataResponse(((QuorumZooKeeperServer)zks).self.getQuorumVerifier().toString().getBytes(), rc.stat);
                 err = Code.get(rc.err);
                 break;
             }
@@ -276,6 +239,7 @@ public class FinalRequestProcessor implements RequestProcessor {
             }
             case OpCode.closeSession: {
                 lastOp = "CLOS";
+                closeSession = true;
                 err = Code.get(rc.err);
                 break;
             }
@@ -337,8 +301,8 @@ public class FinalRequestProcessor implements RequestProcessor {
                 request.request.rewind();
                 ByteBufferInputStream.byteBuffer2Record(request.request, setWatches);
                 long relativeZxid = setWatches.getRelativeZxid();
-                zks.getZKDatabase().setWatches(relativeZxid,
-                        setWatches.getDataWatches(),
+                zks.getZKDatabase().setWatches(relativeZxid, 
+                        setWatches.getDataWatches(), 
                         setWatches.getExistWatches(),
                         setWatches.getChildWatches(), cnxn);
                 break;
@@ -349,7 +313,7 @@ public class FinalRequestProcessor implements RequestProcessor {
                 ByteBufferInputStream.byteBuffer2Record(request.request,
                         getACLRequest);
                 Stat stat = new Stat();
-                List<ACL> acl =
+                List<ACL> acl = 
                     zks.getZKDatabase().getACL(getACLRequest.getPath(), stat);
                 rsp = new GetACLResponse(acl, stat);
                 break;
@@ -366,9 +330,9 @@ public class FinalRequestProcessor implements RequestProcessor {
                 Long aclG;
                 synchronized(n) {
                     aclG = n.acl;
-
+                    
                 }
-                PrepRequestProcessor.checkACL(zks, zks.getZKDatabase().convertLong(aclG),
+                PrepRequestProcessor.checkACL(zks, zks.getZKDatabase().convertLong(aclG), 
                         ZooDefs.Perms.READ,
                         request.authInfo);
                 List<String> children = zks.getZKDatabase().getChildren(
@@ -391,7 +355,7 @@ public class FinalRequestProcessor implements RequestProcessor {
                 synchronized(n) {
                     aclG = n.acl;
                 }
-                PrepRequestProcessor.checkACL(zks, zks.getZKDatabase().convertLong(aclG),
+                PrepRequestProcessor.checkACL(zks, zks.getZKDatabase().convertLong(aclG), 
                         ZooDefs.Perms.READ,
                         request.authInfo);
                 List<String> children = zks.getZKDatabase().getChildren(
@@ -400,43 +364,13 @@ public class FinalRequestProcessor implements RequestProcessor {
                 rsp = new GetChildren2Response(children, stat);
                 break;
             }
-            case OpCode.checkWatches: {
-                lastOp = "CHKW";
-                CheckWatchesRequest checkWatches = new CheckWatchesRequest();
-                ByteBufferInputStream.byteBuffer2Record(request.request,
-                        checkWatches);
-                WatcherType type = WatcherType.fromInt(checkWatches.getType());
-                boolean containsWatcher = zks.getZKDatabase().containsWatcher(
-                        checkWatches.getPath(), type, cnxn);
-                if (!containsWatcher) {
-                    String msg = String.format(Locale.ENGLISH, "%s (type: %s)",
-                            new Object[] { checkWatches.getPath(), type });
-                    throw new KeeperException.NoWatcherException(msg);
-                }
-                break;
-            }
-            case OpCode.removeWatches: {
-                lastOp = "REMW";
-                RemoveWatchesRequest removeWatches = new RemoveWatchesRequest();
-                ByteBufferInputStream.byteBuffer2Record(request.request,
-                        removeWatches);
-                WatcherType type = WatcherType.fromInt(removeWatches.getType());
-                boolean removed = zks.getZKDatabase().removeWatch(
-                        removeWatches.getPath(), type, cnxn);
-                if (!removed) {
-                    String msg = String.format(Locale.ENGLISH, "%s (type: %s)",
-                            new Object[] { removeWatches.getPath(), type });
-                    throw new KeeperException.NoWatcherException(msg);
-                }
-                break;
-            }
             }
         } catch (SessionMovedException e) {
             // session moved is a connection level error, we need to tear
             // down the connection otw ZOOKEEPER-710 might happen
             // ie client on slow follower starts to renew session, fails
             // before this completes, then tries the fast follower (leader)
-            // and is successful, however the initial renew is then
+            // and is successful, however the initial renew is then 
             // successfully fwd/processed by the leader and as a result
             // the client and leader disagree on where the client is most
             // recently attached (and therefore invalid SESSION MOVED generated)
@@ -464,27 +398,16 @@ public class FinalRequestProcessor implements RequestProcessor {
 
         zks.serverStats().updateLatency(request.createTime);
         cnxn.updateStatsForResponse(request.cxid, lastZxid, lastOp,
-                    request.createTime, Time.currentElapsedTime());
+                    request.createTime, System.currentTimeMillis());
 
         try {
             cnxn.sendResponse(hdr, rsp, "response");
-            if (request.type == OpCode.closeSession) {
+            if (closeSession) {
                 cnxn.sendCloseSession();
             }
         } catch (IOException e) {
             LOG.error("FIXMSG",e);
         }
-    }
-
-    private boolean closeSession(ServerCnxnFactory serverCnxnFactory, long sessionId) {
-        if (serverCnxnFactory == null) {
-            return false;
-        }
-        return serverCnxnFactory.closeSession(sessionId);
-    }
-
-    private boolean connClosedByClient(Request request) {
-        return request.cnxn == null;
     }
 
     public void shutdown() {

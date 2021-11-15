@@ -40,10 +40,11 @@ public class ZooInspectorAboutDialog extends JDialog {
      * @param frame
      *            - the Frame from which the dialog is displayed
      */
-    public ZooInspectorAboutDialog(Frame frame, IconResource iconResource) {
+    public ZooInspectorAboutDialog(Frame frame) {
         super(frame);
         this.setLayout(new BorderLayout());
-        this.setIconImage(iconResource.get(IconResource.ICON_INFORMATION, "About ZooInspector").getImage());
+        this.setIconImage(ZooInspectorIconResources.getInformationIcon()
+                .getImage());
         this.setTitle("About ZooInspector");
         this.setModal(true);
         this.setAlwaysOnTop(true);

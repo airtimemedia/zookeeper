@@ -24,8 +24,12 @@ import java.io.IOException;
 import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.zookeeper.server.persistence.FileTxnSnapLog;
 import org.apache.zookeeper.server.persistence.Util;
 
@@ -38,6 +42,8 @@ import org.apache.zookeeper.server.persistence.Util;
  * and the corresponding logs.
  */
 public class PurgeTxnLog {
+    private static final Logger LOG = LoggerFactory.getLogger(PurgeTxnLog.class);
+
     static void printUsage(){
         System.out.println("PurgeTxnLog dataLogDir [snapDir] -n count");
         System.out.println("\tdataLogDir -- path to the txn log directory");
@@ -45,16 +51,10 @@ public class PurgeTxnLog {
         System.out.println("\tcount -- the number of old snaps/logs you want to keep");
         System.exit(1);
     }
-
-    private static final String PREFIX_SNAPSHOT = "snapshot";
-    private static final String PREFIX_LOG = "log";
-
+    
     /**
-     * Purges the snapshot and logs keeping the last num snapshots and the
-     * corresponding logs. If logs are rolling or a new snapshot is created
-     * during this process, these newest N snapshots or any data logs will be
-     * excluded from current purging cycle.
-     *
+     * purges the snapshot and logs keeping the last num snapshots 
+     * and the corresponding logs.
      * @param dataDir the dir that has the logs
      * @param snapDir the dir that has the snapshots
      * @param num the number of snapshots to keep
@@ -66,41 +66,38 @@ public class PurgeTxnLog {
         }
 
         FileTxnSnapLog txnLog = new FileTxnSnapLog(dataDir, snapDir);
-
-        List<File> snaps = txnLog.findNRecentSnapshots(num);
-        retainNRecentSnapshots(txnLog, snaps);
-    }
-
-    // VisibleForTesting
-    static void retainNRecentSnapshots(FileTxnSnapLog txnLog, List<File> snaps) {
+        
         // found any valid recent snapshots?
-        if (snaps.size() == 0)
+        
+        // files to exclude from deletion
+        Set<File> exc=new HashSet<File>();
+        List<File> snaps = txnLog.findNRecentSnapshots(num);
+        if (snaps.size() == 0) 
             return;
         File snapShot = snaps.get(snaps.size() -1);
-        final long leastZxidToBeRetain = Util.getZxidFromName(
-                snapShot.getName(), PREFIX_SNAPSHOT);
+        for (File f: snaps) {
+            exc.add(f);
+        }
+        long zxid = Util.getZxidFromName(snapShot.getName(),"snapshot");
+        exc.addAll(Arrays.asList(txnLog.getSnapshotLogs(zxid)));
 
+        final Set<File> exclude=exc;
         class MyFileFilter implements FileFilter{
             private final String prefix;
             MyFileFilter(String prefix){
                 this.prefix=prefix;
             }
             public boolean accept(File f){
-                if(!f.getName().startsWith(prefix + "."))
+                if(!f.getName().startsWith(prefix) || exclude.contains(f))
                     return false;
-                long fZxid = Util.getZxidFromName(f.getName(), prefix);
-                if (fZxid >= leastZxidToBeRetain) {
-                    return false;
-                }
                 return true;
             }
         }
         // add all non-excluded log files
-        List<File> files = new ArrayList<File>(Arrays.asList(txnLog
-                .getDataDir().listFiles(new MyFileFilter(PREFIX_LOG))));
+        List<File> files=new ArrayList<File>(
+                Arrays.asList(txnLog.getDataDir().listFiles(new MyFileFilter("log."))));
         // add all non-excluded snapshot files to the deletion list
-        files.addAll(Arrays.asList(txnLog.getSnapDir().listFiles(
-                new MyFileFilter(PREFIX_SNAPSHOT))));
+        files.addAll(Arrays.asList(txnLog.getSnapDir().listFiles(new MyFileFilter("snapshot."))));
         // remove the old files
         for(File f: files)
         {

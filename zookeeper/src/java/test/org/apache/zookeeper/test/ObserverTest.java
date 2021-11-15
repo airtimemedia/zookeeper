@@ -71,17 +71,18 @@ public class ObserverTest extends QuorumPeerTestBase implements Watcher{
         final int CLIENT_PORT_OBS = PortAssignment.unique();
 
         
-        String quorumCfgSection = 
+        String quorumCfgSection =
+            "electionAlg=3\n" + 
             "server.1=127.0.0.1:" + (PORT_QP1)
-            + ":" + (PORT_QP_LE1) + ";" +  CLIENT_PORT_QP1 
+            + ":" + (PORT_QP_LE1)
             + "\nserver.2=127.0.0.1:" + (PORT_QP2)
-            + ":" + (PORT_QP_LE2) + ";" + CLIENT_PORT_QP2  
+            + ":" + (PORT_QP_LE2)
             + "\nserver.3=127.0.0.1:" 
-            + (PORT_OBS)+ ":" + (PORT_OBS_LE) + ":observer" + ";" + CLIENT_PORT_OBS;
-        
+            + (PORT_OBS)+ ":" + (PORT_OBS_LE) + ":observer";
+        String obsCfgSection =  quorumCfgSection + "\npeerType=observer";
         MainThread q1 = new MainThread(1, CLIENT_PORT_QP1, quorumCfgSection);
         MainThread q2 = new MainThread(2, CLIENT_PORT_QP2, quorumCfgSection);
-        MainThread q3 = new MainThread(3, CLIENT_PORT_OBS, quorumCfgSection);
+        MainThread q3 = new MainThread(3, CLIENT_PORT_OBS, obsCfgSection);
         q1.start();
         q2.start();
         q3.start();
@@ -200,7 +201,7 @@ public class ObserverTest extends QuorumPeerTestBase implements Watcher{
         
         String quorumCfgSection =
             "server.1=127.0.0.1:" + (PortAssignment.unique())
-            + ":" + (PortAssignment.unique()) + ":observer;" + CLIENT_PORT_QP1 + "\n";
+            + ":" + (PortAssignment.unique()) + ":observer\npeerType=observer\n";
                     
         MainThread q1 = new MainThread(1, CLIENT_PORT_QP1, quorumCfgSection);
         q1.start();

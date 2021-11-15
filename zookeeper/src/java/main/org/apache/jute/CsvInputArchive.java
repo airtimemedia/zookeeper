@@ -44,6 +44,10 @@ class CsvInputArchive implements InputArchive {
         public void incr() {}
     }
     
+    private void throwExceptionOnError(String tag) throws IOException {
+        throw new IOException("Error deserializing "+tag);
+    }
+    
     private String readField(String tag) throws IOException {
         try {
             StringBuilder buf = new StringBuilder();

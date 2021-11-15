@@ -26,7 +26,6 @@ import org.apache.zookeeper.ZooDefs.OpCode;
 import org.apache.zookeeper.proto.ReplyHeader;
 import org.apache.zookeeper.server.Request;
 import org.apache.zookeeper.server.RequestProcessor;
-import org.apache.zookeeper.server.ZooKeeperCriticalThread;
 import org.apache.zookeeper.server.ZooKeeperServer;
 import org.apache.zookeeper.server.ZooTrace;
 import org.apache.zookeeper.server.quorum.Leader.XidRolloverException;
@@ -39,23 +38,20 @@ import org.slf4j.LoggerFactory;
  * OpCode.getData, OpCode.exists) through to the next processor, but drops
  * state-changing operations (e.g. OpCode.create, OpCode.setData).
  */
-public class ReadOnlyRequestProcessor extends ZooKeeperCriticalThread implements
-        RequestProcessor {
+public class ReadOnlyRequestProcessor extends Thread implements RequestProcessor {
 
     private static final Logger LOG = LoggerFactory.getLogger(ReadOnlyRequestProcessor.class);
 
-    private final LinkedBlockingQueue<Request> queuedRequests = new LinkedBlockingQueue<Request>();
+    private LinkedBlockingQueue<Request> queuedRequests = new LinkedBlockingQueue<Request>();
 
     private boolean finished = false;
 
-    private final RequestProcessor nextProcessor;
+    private RequestProcessor nextProcessor;
 
-    private final ZooKeeperServer zks;
+    private ZooKeeperServer zks;
 
-    public ReadOnlyRequestProcessor(ZooKeeperServer zks,
-            RequestProcessor nextProcessor) {
-        super("ReadOnlyRequestProcessor:" + zks.getServerId(), zks
-                .getZooKeeperServerListener());
+    public ReadOnlyRequestProcessor(ZooKeeperServer zks, RequestProcessor nextProcessor) {
+        super("ReadOnlyRequestProcessor:" + zks.getServerId());
         this.zks = zks;
         this.nextProcessor = nextProcessor;
     }
@@ -81,12 +77,8 @@ public class ReadOnlyRequestProcessor extends ZooKeeperCriticalThread implements
                 switch (request.type) {
                 case OpCode.sync:
                 case OpCode.create:
-                case OpCode.create2:
-                case OpCode.createContainer:
                 case OpCode.delete:
-                case OpCode.deleteContainer:
                 case OpCode.setData:
-                case OpCode.reconfig:
                 case OpCode.setACL:
                 case OpCode.multi:
                 case OpCode.check:
@@ -105,13 +97,15 @@ public class ReadOnlyRequestProcessor extends ZooKeeperCriticalThread implements
                     nextProcessor.processRequest(request);
                 }
             }
+        } catch (InterruptedException e) {
+            LOG.error("Unexpected interruption", e);
         } catch (RequestProcessorException e) {
             if (e.getCause() instanceof XidRolloverException) {
                 LOG.info(e.getCause().getMessage());
             }
-            handleException(this.getName(), e);
+            LOG.error("Unexpected exception", e);
         } catch (Exception e) {
-            handleException(this.getName(), e);
+            LOG.error("Unexpected exception", e);
         }
         LOG.info("ReadOnlyRequestProcessor exited loop!");
     }

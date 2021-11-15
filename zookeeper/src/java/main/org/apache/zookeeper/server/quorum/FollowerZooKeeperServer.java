@@ -37,39 +37,43 @@ import org.apache.zookeeper.txn.TxnHeader;
  * Just like the standard ZooKeeperServer. We just replace the request
  * processors: FollowerRequestProcessor -> CommitProcessor ->
  * FinalRequestProcessor
- *
+ * 
  * A SyncRequestProcessor is also spawned off to log proposals from the leader.
  */
 public class FollowerZooKeeperServer extends LearnerZooKeeperServer {
     private static final Logger LOG =
         LoggerFactory.getLogger(FollowerZooKeeperServer.class);
 
+    CommitProcessor commitProcessor;
+
+    SyncRequestProcessor syncProcessor;
+
     /*
      * Pending sync requests
      */
     ConcurrentLinkedQueue<Request> pendingSyncs;
-
+    
     /**
      * @param port
      * @param dataDir
      * @throws IOException
      */
     FollowerZooKeeperServer(FileTxnSnapLog logFactory,QuorumPeer self,
-            ZKDatabase zkDb) throws IOException {
+            DataTreeBuilder treeBuilder, ZKDatabase zkDb) throws IOException {
         super(logFactory, self.tickTime, self.minSessionTimeout,
-                self.maxSessionTimeout, zkDb, self);
+                self.maxSessionTimeout, treeBuilder, zkDb, self);
         this.pendingSyncs = new ConcurrentLinkedQueue<Request>();
     }
 
     public Follower getFollower(){
         return self.follower;
-    }
+    }      
 
     @Override
     protected void setupRequestProcessors() {
         RequestProcessor finalProcessor = new FinalRequestProcessor(this);
         commitProcessor = new CommitProcessor(finalProcessor,
-                Long.toString(getServerId()), true, getZooKeeperServerListener());
+                Long.toString(getServerId()), true);
         commitProcessor.start();
         firstProcessor = new FollowerRequestProcessor(this, commitProcessor);
         ((FollowerRequestProcessor) firstProcessor).start();
@@ -81,7 +85,11 @@ public class FollowerZooKeeperServer extends LearnerZooKeeperServer {
     LinkedBlockingQueue<Request> pendingTxns = new LinkedBlockingQueue<Request>();
 
     public void logRequest(TxnHeader hdr, Record txn) {
-        Request request = new Request(hdr.getClientId(), hdr.getCxid(), hdr.getType(), hdr, txn, hdr.getZxid());
+        Request request = new Request(null, hdr.getClientId(), hdr.getCxid(),
+                hdr.getType(), null, null);
+        request.hdr = hdr;
+        request.txn = txn;
+        request.zxid = hdr.getZxid();
         if ((request.zxid & 0xffffffffL) != 0) {
             pendingTxns.add(request);
         }
@@ -89,7 +97,7 @@ public class FollowerZooKeeperServer extends LearnerZooKeeperServer {
     }
 
     /**
-     * When a COMMIT message is received, eventually this method is called,
+     * When a COMMIT message is received, eventually this method is called, 
      * which matches up the zxid from the COMMIT with (hopefully) the head of
      * the pendingTxns queue and hands it to the commitProcessor to commit.
      * @param zxid - must correspond to the head of pendingTxns if it exists
@@ -110,23 +118,40 @@ public class FollowerZooKeeperServer extends LearnerZooKeeperServer {
         Request request = pendingTxns.remove();
         commitProcessor.commit(request);
     }
-
+    
     synchronized public void sync(){
         if(pendingSyncs.size() ==0){
             LOG.warn("Not expecting a sync.");
             return;
         }
-
+                
         Request r = pendingSyncs.remove();
 		commitProcessor.commit(r);
     }
-
+             
     @Override
     public int getGlobalOutstandingLimit() {
-        int divisor = self.getQuorumSize() > 2 ? self.getQuorumSize() - 1 : 1;
-        return super.getGlobalOutstandingLimit() / divisor;
+        return super.getGlobalOutstandingLimit() / (self.getQuorumSize() - 1);
     }
-
+    
+    @Override
+    public void shutdown() {
+        LOG.info("Shutting down");
+        try {
+            super.shutdown();
+        } catch (Exception e) {
+            LOG.warn("Ignoring unexpected exception during shutdown", e);
+        }
+        try {
+            if (syncProcessor != null) {
+                syncProcessor.shutdown();
+            }
+        } catch (Exception e) {
+            LOG.warn("Ignoring unexpected exception in syncprocessor shutdown",
+                    e);
+        }
+    }
+    
     @Override
     public String getState() {
         return "follower";

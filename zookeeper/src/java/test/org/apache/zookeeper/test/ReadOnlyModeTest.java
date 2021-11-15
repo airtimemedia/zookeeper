@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
+import junit.framework.Assert;
 
 import org.apache.log4j.Layout;
 import org.apache.log4j.Level;
@@ -41,10 +42,8 @@ import org.apache.zookeeper.ZKTestCase;
 import org.apache.zookeeper.ZooDefs;
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.ZooKeeper.States;
-import org.apache.zookeeper.common.Time;
 import org.apache.zookeeper.test.ClientBase.CountdownWatcher;
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -105,7 +104,7 @@ public class ReadOnlyModeTest extends ZKTestCase {
         Assert.assertNull("Should have created the znode:" + node2,
                 zk.exists(node2, false));
     }
-    
+
     /**
      * Basic test of read-only client functionality. Tries to read and write
      * during read-only mode, then regains a quorum and tries to write again.
@@ -124,12 +123,6 @@ public class ReadOnlyModeTest extends ZKTestCase {
 
         watcher.reset();
         qu.shutdown(2);
-        zk.close();
-
-        // Re-connect the client (in case we were connected to the shut down
-        // server and the local session was not persisted).
-        zk = new ZooKeeper(qu.getConnString(), CONNECTION_TIMEOUT,
-                watcher, true);
         watcher.waitForConnected(CONNECTION_TIMEOUT);
 
         // read operation during r/o mode
@@ -147,13 +140,6 @@ public class ReadOnlyModeTest extends ZKTestCase {
         qu.start(2);
         Assert.assertTrue("waiting for server up", ClientBase.waitForServerUp(
                 "127.0.0.1:" + qu.getPeer(2).clientPort, CONNECTION_TIMEOUT));
-        zk.close();
-        watcher.reset();
-
-        // Re-connect the client (in case we were connected to the shut down
-        // server and the local session was not persisted).
-        zk = new ZooKeeper(qu.getConnString(), CONNECTION_TIMEOUT,
-                watcher, true);
         watcher.waitForConnected(CONNECTION_TIMEOUT);
         zk.setData(node, "We're in the quorum now".getBytes(), -1);
 
@@ -189,21 +175,13 @@ public class ReadOnlyModeTest extends ZKTestCase {
         // kill peer and wait no more than 5 seconds for read-only server
         // to be started (which should take one tickTime (2 seconds))
         qu.shutdown(2);
-
-        // Re-connect the client (in case we were connected to the shut down
-        // server and the local session was not persisted).
-        zk = new ZooKeeper(qu.getConnString(), CONNECTION_TIMEOUT,
-                new Watcher() {
-                    public void process(WatchedEvent event) {
-                        states.add(event.getState());
-                    }
-                }, true);
-        long start = Time.currentElapsedTime();
+        long start = System.currentTimeMillis();
         while (!(zk.getState() == States.CONNECTEDREADONLY)) {
             Thread.sleep(200);
             // FIXME this was originally 5 seconds, but realistically, on random/slow/virt hosts, there is no way to guarantee this
-            Assert.assertTrue("Can't connect to the server",
-                              Time.currentElapsedTime() - start < 30000);
+            Assert.assertTrue("Can't connect to the server", System
+                    .currentTimeMillis()
+                    - start < 30000);
         }
 
         // At this point states list should contain, in the given order,
@@ -250,6 +228,7 @@ public class ReadOnlyModeTest extends ZKTestCase {
     @SuppressWarnings("deprecation")
     @Test(timeout = 90000)
     public void testSeekForRwServer() throws Exception {
+
         // setup the logger to capture all logs
         Layout layout = Logger.getRootLogger().getAppender("CONSOLE")
                 .getLayout();

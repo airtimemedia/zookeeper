@@ -24,24 +24,20 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
 
     <!-- read build.properties from the basedir if any -->
     <property file="${basedir}/build.properties" />
+
     <property name="Name" value="ZooKeeper" />
     <property name="name" value="zookeeper" />
 
     <property environment="env"/>
     
-    <property name="version-major" value="3" />
-    <property name="version-minor" value="6" />
-    <property name="version-patch" value="0" />
-    <property name="version" value="${version-major}.${version-minor}.${version-patch}-SNAPSHOT" />
-
+    <property name="version" value="3.4.6" />
     <property name="final.name" value="${name}-${version}"/>
     <property name="revision.dir" value="${basedir}/.revision" />
     <property name="revision.properties" value="revision.properties" />
     <property file="${basedir}/src/java/${revision.properties}" />
     
-    <property name="javac.target" value="1.7" />
-    <property name="javac.source" value="1.7" />
-    <property name="build.encoding" value="utf8" />
+    <property name="javac.target" value="1.5" />
+    <property name="javac.source" value="1.5" />
 
     <property name="src.dir" value="${basedir}/src" />
     <property name="java.src.dir" value="${src.dir}/java/main" />
@@ -76,16 +72,15 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
     <property name="systest.src.dir" value="${src.dir}/java/systest"/>
     <property name="test.log.dir" value="${test.java.build.dir}/logs" />
     <property name="test.data.dir" value="${test.java.build.dir}/data" />
+    <property name="test.data.upgrade.dir" value="${test.data.dir}/upgrade" />
     <property name="test.data.invalid.dir" value="${test.data.dir}/invalidsnap" />
     <property name="test.data.buffersize.dir" value="${test.data.dir}/buffersize" />
-    <property name="test.data.ssl.dir" value="${test.data.dir}/ssl" />
     <property name="test.cppunit.dir" value="${test.java.build.dir}/test-cppunit"/>
     <property name="test.tmp.dir" value="${test.java.build.dir}/tmp" />
     <property name="test.output" value="no" />
     <property name="test.timeout" value="900000" />
     <property name="test.junit.output.format" value="plain" />
     <property name="test.junit.fork.mode" value="perTest" />
-    <property name="test.junit.threads" value="1" />
     <property name="test.junit.printsummary" value="yes" />
     <property name="test.junit.haltonfailure" value="no" />
     <property name="config.dir" value="${src.dir}/java/test/config" />
@@ -144,6 +139,10 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
 
     <property name="test.cobertura.output.format" value="html" />
     <property name="coveragereport.dir" value="${build.dir}/cobertura" />
+
+    <!-- rats properties -->
+    <property name="rats_url" value="http://arat.googlecode.com/files/rat-lib-all-0.5.1.jar" />
+    <property name="rat.reporting.classname" value="rat.Report"/>
 
         <!-- test patch properties -->
     <property name="scratch.dir" value="${user.home}/tmp"/>
@@ -267,28 +266,10 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
         </tstamp>
     </target>
     
-	
-    <target name="generate_jute_parser" depends="init,ivy-retrieve">
-      <property name="jute_javacc.dir" value="${build.dir}/jute_compiler" />
-      <property name="jute_javacc.packagedir" value="/org/apache/jute/compiler/generated" />
-      <mkdir dir="${jute_javacc.dir}${jute_javacc.packagedir}"/>
-      <!-- the javacc task expects a "javacc.jar" file... -->
-      <ivy:artifactproperty name="[artifact].revision" value="[revision]" />
-      <move file="${ivy.lib}/javacc-${javacc.revision}.jar" tofile="${ivy.lib}/javacc.jar" failonerror="false"/>
-      <javacc
-          target="${java.src.dir}${jute_javacc.packagedir}/rcc.jj"
-          outputdirectory="${jute_javacc.dir}${jute_javacc.packagedir}/"
-          javacchome="${ivy.lib}"
-          />
-    </target>
-     
-    <target name="jute" depends="generate_jute_parser">
-        <javac srcdir="${jute_javacc.dir}" destdir="${build.classes}" includeantruntime="false"
+    <target name="jute" depends="init">
+        <javac srcdir="${java.src.dir}" destdir="${build.classes}" includeantruntime="false"
             target="${javac.target}" source="${javac.source}"
-            includes="org/apache/jute/**" debug="on" encoding="${build.encoding}">
-          <src path="${java.src.dir}" />
-          <src path="${jute_javacc.dir}" />
-        </javac>
+            includes="org/apache/jute/**" debug="on" />
     </target>
 
     <target name="compile_jute_uptodate">
@@ -306,7 +287,6 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
             <arg value="../../zookeeper.jute" /> 
             <classpath>
                 <pathelement path="${build.classes}" />
-                <pathelement path="${jute_javacc.dir}" />
             </classpath>
         </java>
         
@@ -325,7 +305,7 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
     <target name="ver-gen" depends="init">
         <javac srcdir="${java.src.dir}" destdir="${build.classes}" includeantruntime="false"
             target="${javac.target}" source="${javac.source}"
-            includes="org/apache/zookeeper/version/util/**" debug="on" encoding="${build.encoding}" />
+            includes="org/apache/zookeeper/version/util/**" debug="on" />
     </target>
     
     <target name="svn-revision" unless="lastRevision">
@@ -356,9 +336,9 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
         </java>
     </target>
     
-    <target name="build-generated" depends="compile_jute,version-info,process-template" >
+    <target name="build-generated" depends="compile_jute,version-info" >
         <javac srcdir="${src_generated.dir}" destdir="${build.classes}" includeantruntime="false"
-            target="${javac.target}" source="${javac.source}" debug="on" encoding="${build.encoding}" />
+            target="${javac.target}" source="${javac.source}" debug="on" />
     </target>
     
     <target name="ivy-download" unless="ivy.jar.exists" depends="init">
@@ -406,24 +386,6 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
       <ivy:cachepath pathid="releaseaudit-classpath" conf="releaseaudit"/>
     </target>
 
-    <target name="process-template">
-      <copy todir="${c.src.dir}" verbose="true" overwrite="true" failonerror="true">
-        <fileset dir="${c.src.dir}">
-          <include name="configure.ac.in"/>
-          <include name="include/zookeeper_version.h.in"/>
-        </fileset>
-        <mapper>
-          <globmapper from="*.in" to="*"/>
-        </mapper>
-        <filterchain>
-          <striplinecomments>
-	     <comment value="!" />
-	  </striplinecomments>
-          <expandproperties />
-        </filterchain>
-      </copy>
-    </target>
-    
     <target name="ivy-retrieve-mvn-ant-task" depends="init,ivy-init">
       <ivy:retrieve settingsRef="${ant.project.name}" conf="mvn-ant-task"
                     pattern="${ivy.lib}/[artifact]-[revision].[ext]"/>
@@ -431,7 +393,7 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
     </target>
     <target name="compile" depends="ivy-retrieve,clover,build-generated">
         <javac srcdir="${java.src.dir}" destdir="${build.classes}" includeantruntime="false"
-               target="${javac.target}" source="${javac.source}" debug="on" encoding="${build.encoding}">
+               target="${javac.target}" source="${javac.source}" debug="on">
             <classpath refid="java.classpath"/>
             <compilerarg value="-Xlint:all"/>
             <compilerarg value="-Xlint:-path"/>
@@ -441,11 +403,11 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
     <target name="compile-test" depends="ivy-retrieve-test,compile">
       <mkdir dir="${test.java.classes}"/>
       <javac srcdir="${test.src.dir}" destdir="${test.java.classes}" includeantruntime="false"
-             target="${javac.target}" source="${javac.source}" debug="on" encoding="${build.encoding}">
+             target="${javac.target}" source="${javac.source}" debug="on">
         <classpath refid="test.java.classpath"/>
       </javac>
       <javac srcdir="${systest.src.dir}" destdir="${test.java.classes}" includeantruntime="false"
-             target="${javac.target}" source="${javac.source}" debug="on" encoding="${build.encoding}">
+             target="${javac.target}" source="${javac.source}" debug="on">
         <classpath refid="test.java.classpath"/>
       </javac>
     </target>
@@ -569,7 +531,7 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
     <!-- ====================================================== -->
     <target name="jar" depends="compile">
         <java classname="org.apache.zookeeper.Version" fork="true"
-              outputproperty="revision" errorproperty="revision.error" failonerror="true">
+              outputproperty="revision" failonerror="true">
             <arg value="--revision" />
             <classpath>
                 <pathelement path="${build.classes}" />
@@ -601,7 +563,7 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
                 <attribute name="Bundle-Version" value="${version}"/>
                 <attribute name="Bundle-License" value="http://www.apache.org/licenses/LICENSE-2.0.txt"/>
                 <attribute name="Bundle-DocURL" value="http://hadoop.apache.org/zookeeper"/>
-                <attribute name="Import-Package" value='javax.management;resolution:=optional,javax.security.auth.callback,javax.security.auth.login,javax.security.sasl,org.slf4j;version="[1.6,2)",org.jboss.netty.buffer;resolution:=optional;version="[3.2,4)",org.jboss.netty.channel;resolution:=optional;version="[3.2,4)",org.jboss.netty.channel.group;resolution:=optional;version="[3.2,4)",org.jboss.netty.channel.socket.nio;resolution:=optional;version="[3.2,4)",org.osgi.framework;resolution:=optional;version="[1.5,2)",org.osgi.util.tracker;resolution:=optional;version="[1.4,2)",org.ietf.jgss'/>
+                <attribute name="Import-Package" value='javax.management;resolution:=optional,javax.security.auth.callback,javax.security.auth.login,javax.security.sasl,org.slf4j;version="[1.6,2)",org.jboss.netty.buffer;resolution:=optional;version="[3.2,4)",org.jboss.netty.channel;resolution:=optional;version="[3.2,4)",org.jboss.netty.channel.group;resolution:=optional;version="[3.2,4)",org.jboss.netty.channel.socket.nio;resolution:=optional;version="[3.2,4)",org.osgi.framework;resolution:=optional;version="[1.5,2)",org.osgi.util.tracker;resolution:=optional;version="[1.4,2)"'/>
                 <attribute name="Export-Package" value='org.apache.zookeeper;version="${version}",org.apache.zookeeper.client;version="${version}",org.apache.zookeeper.data;version="${version}",org.apache.zookeeper.version;version="${version}",org.apache.zookeeper.server;version="${version}",org.apache.zookeeper.server.auth;version="${version}",org.apache.zookeeper.server.persistence;version="${version}",org.apache.zookeeper.server.quorum;version="${version}",org.apache.zookeeper.common;version="${version}"'/>
             </manifest>
         </jar>
@@ -642,7 +604,7 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
                 <attribute name="Bundle-Version" value="${version}"/>
                 <attribute name="Bundle-License" value="http://www.apache.org/licenses/LICENSE-2.0.txt"/>
                 <attribute name="Bundle-DocURL" value="http://hadoop.apache.org/zookeeper"/>
-                <attribute name="Import-Package" value='javax.management;resolution:=optional,javax.security.auth.callback,javax.security.auth.login,javax.security.sasl,org.slf4j;version="[1.6,2)",org.jboss.netty.buffer;resolution:=optional;version="[3.2,4)",org.jboss.netty.channel;resolution:=optional;version="[3.2,4)",org.jboss.netty.channel.group;resolution:=optional;version="[3.2,4)",org.jboss.netty.channel.socket.nio;resolution:=optional;version="[3.2,4)",org.osgi.framework;resolution:=optional;version="[1.5,2)",org.osgi.util.tracker;resolution:=optional;version="[1.4,2)",org.ietf.jgss'/>
+                <attribute name="Import-Package" value='javax.management;resolution:=optional,javax.security.auth.callback,javax.security.auth.login,javax.security.sasl,org.slf4j;version="[1.6,2)",org.jboss.netty.buffer;resolution:=optional;version="[3.2,4)",org.jboss.netty.channel;resolution:=optional;version="[3.2,4)",org.jboss.netty.channel.group;resolution:=optional;version="[3.2,4)",org.jboss.netty.channel.socket.nio;resolution:=optional;version="[3.2,4)",org.osgi.framework;resolution:=optional;version="[1.5,2)",org.osgi.util.tracker;resolution:=optional;version="[1.4,2)"'/>
                 <attribute name="Export-Package" value='org.apache.zookeeper;version="${version}",org.apache.zookeeper.client;version="${version}",org.apache.zookeeper.data;version="${version}",org.apache.zookeeper.version;version="${version}",org.apache.zookeeper.server;version="${version}",org.apache.zookeeper.server.auth;version="${version}",org.apache.zookeeper.server.persistence;version="${version}",org.apache.zookeeper.server.quorum;version="${version}",org.apache.zookeeper.common;version="${version}"'/>
             </manifest>
         </jar>
@@ -1019,21 +981,10 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
     </target>
 
     <target name="rpm" depends="package-native, tar" description="Make rpm package">
-      <!--The RPM spec file format disallows hyphen in the version.  Replace with
-          underscore to support version tags like -alpha or -SNAPSHOT.-->
-      <loadresource property="rpm.version">
-        <propertyresource name="version" />
-        <filterchain>
-          <tokenfilter>
-            <replacestring from="-" to="_" />
-          </tokenfilter>
-        </filterchain>
-      </loadresource>
       <subant target="rpm">
         <!--Pass down the version in case its needed again and the target
             distribution directory so contribs know where to install to.-->
         <property name="version" value="${version}"/>
-        <property name="rpm.version" value="${rpm.version}"/>
         <property name="dist.dir" value="${dist.dir}"/>
         <fileset file="${contrib.dir}/build.xml"/>
         <fileset file="${recipes.dir}/build.xml"/>
@@ -1059,7 +1010,7 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
         <filterchain>
           <replacetokens>
             <token key="final.name" value="${final.name}" />
-            <token key="version" value="${rpm.version}" />
+            <token key="version" value="${version}" />
             <token key="package.release" value="${package.release}" />
             <token key="package.build.dir" value="${package.build.dir}" />
             <token key="package.prefix" value="${package.prefix}" />
@@ -1271,14 +1222,18 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
     <target name="test-init" depends="jar,compile-test">
         <delete dir="${test.log.dir}" />
         <delete dir="${test.tmp.dir}" />
+        <delete dir="${test.data.upgrade.dir}" />
         <delete dir="${test.data.invalid.dir}" />
         <delete dir="${test.data.buffersize.dir}" />
-        <delete dir="${test.data.ssl.dir}" />
         <delete dir="${test.data.dir}" />
         <mkdir dir="${test.log.dir}" />
         <mkdir dir="${test.tmp.dir}" />
         <mkdir dir="${test.data.dir}" />
+        <mkdir dir="${test.data.upgrade.dir}" />
         <mkdir dir="${test.data.invalid.dir}" />
+        <copy todir="${test.data.upgrade.dir}">
+            <fileset dir="${basedir}/src/java/test/data/upgrade"/>
+        </copy>
         <copy todir="${test.data.invalid.dir}">
             <fileset dir="${basedir}/src/java/test/data/invalidsnap"/>
         </copy>
@@ -1286,116 +1241,63 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
         <copy todir="${test.data.buffersize.dir}">
             <fileset dir="${basedir}/src/java/test/data/buffersize"/>
         </copy>
-        <mkdir dir="${test.data.ssl.dir}" />
-        <copy todir="${test.data.ssl.dir}">
-            <fileset dir="${basedir}/src/java/test/data/ssl"/>
-        </copy>
+       
     </target>
 
-    <target name="junit-init" depends="test-category">
-      <condition property="quicktest">
-        <and>
-          <equals arg1="${test.quick}" arg2="yes"/>
-          <not>
-            <isset property="testcase"/>
-          </not>
-        </and>
-      </condition>
-      <condition property="fulltest">
-        <and>
-          <equals arg1="${test.quick}" arg2="no"/>
-          <not>
-            <isset property="testcase"/>
-          </not>
-        </and>
-      </condition>
-      <condition property="ant.supports.concurrent.junit.processes">
-        <antversion atleast="1.9.4" />
-      </condition>
-      <property name="build.test.dir" value="${test.tmp.dir}" />
-      <property name="test.data.dir" value="${test.data.dir}" />
-      <property name="log4j.configuration"
-                value="file:${basedir}/conf/log4j.properties" />
-      <!-- superDigest is used by the tests/main code. If this is not set
-           as part of starting the jvm there is no guarantee that the static
-           initializers in the java code will see this (esp when running
-           with junit fork mode set to "once")-->
-      <property name="zookeeper.DigestAuthenticationProvider.superDigest"
-                value="super:D/InIHSb7yEEbrWz8b9l71RjZJU=" />
-      <propertyset id="junit.sys.properties">
-        <propertyref name="build.test.dir" />
-        <propertyref name="test.data.dir" />
-        <propertyref name="log4j.configuration" />
-        <propertyref name="zookeeper.DigestAuthenticationProvider.superDigest" />
-        <propertyref name="test.method" />
-      </propertyset>
-      <path id="junit.classpath">
-        <path refid="test.java.classpath" />
-        <pathelement path="${test.java.classes}" />
-      </path>
-      <fileset id="quicktest.files" dir="${test.src.dir}">
-        <include name="**/*${test.category}Test.java" />
-        <exclude name="**/*HammerTest.java" />
-      </fileset>
-      <fileset id="fulltest.files" dir="${test.src.dir}">
-        <include name="**/*${test.category}Test.java" />
-      </fileset>
-      <fileset id="testcase.files" dir="${test.src.dir}">
-        <include name="**/${testcase}.java" />
-      </fileset>
-    </target>
+    <condition property="quicktest">
+      <and>
+        <equals arg1="${test.quick}" arg2="yes"/>
+        <not>
+          <isset property="testcase"/>
+        </not>
+      </and>
+    </condition>
+    <condition property="fulltest">
+      <and>
+        <equals arg1="${test.quick}" arg2="no"/>
+        <not>
+          <isset property="testcase"/>
+        </not>
+      </and>
+    </condition>
 
-    <target name="junit.run" depends="junit-init,junit.run-single,junit.run-concurrent" />
-
-    <target name="junit.run-concurrent" if="ant.supports.concurrent.junit.processes">
-        <echo>Running ${test.junit.threads} concurrent JUnit processes.</echo>
-        <junit showoutput="${test.output}"
-               printsummary="${test.junit.printsummary}"
-               haltonfailure="${test.junit.haltonfailure}"
-               fork="yes"
-               forkmode="${test.junit.fork.mode}"
-               threads="${test.junit.threads}"
-               maxmemory="${test.junit.maxmem}"
-               dir="${test.java.build.dir}" timeout="${test.timeout}"
-               errorProperty="tests.failed" failureProperty="tests.failed">
-          <syspropertyset refid="junit.sys.properties" />
-          <sysproperty key="test.junit.threads" value="${test.junit.threads}" />
-          <classpath refid="junit.classpath" />
-          <formatter type="${test.junit.output.format}" />
-          <batchtest todir="${test.log.dir}" if="quicktest">
-            <fileset refid="quicktest.files" />
-          </batchtest>
-          <batchtest todir="${test.log.dir}" if="fulltest">
-            <fileset refid="fulltest.files" />
-          </batchtest>
-          <batchtest todir="${test.log.dir}" if="testcase">
-            <fileset refid="testcase.files" />
-          </batchtest>
-        </junit>
-        <fail if="tests.failed">Tests failed!</fail>
-    </target>
-
-    <target name="junit.run-single" unless="ant.supports.concurrent.junit.processes">
-        <echo>Running single JUnit process.  Upgrade to Ant 1.9.4 or later to run multiple JUnit processes.</echo>
+    <target name="junit.run">
         <junit showoutput="${test.output}"
                printsummary="${test.junit.printsummary}"
                haltonfailure="${test.junit.haltonfailure}"
                fork="yes"
                forkmode="${test.junit.fork.mode}"
                maxmemory="${test.junit.maxmem}"
-               dir="${test.java.build.dir}" timeout="${test.timeout}"
+               dir="${basedir}" timeout="${test.timeout}"
                errorProperty="tests.failed" failureProperty="tests.failed">
-          <syspropertyset refid="junit.sys.properties" />
-          <classpath refid="junit.classpath" />
+          <sysproperty key="build.test.dir" value="${test.tmp.dir}" />
+          <sysproperty key="test.data.dir" value="${test.data.dir}" />
+          <sysproperty key="log4j.configuration"
+                       value="file:${basedir}/conf/log4j.properties" />
+          <!-- superDigest is used by the tests/main code. If this is not set
+               as part of starting the jvm there is no guarantee that the static
+               initializers in the java code will see this (esp when running
+               with junit fork mode set to "once")-->
+          <sysproperty key="zookeeper.DigestAuthenticationProvider.superDigest"
+                       value="super:D/InIHSb7yEEbrWz8b9l71RjZJU=" />
+          <classpath refid="test.java.classpath"/>
+          <classpath>
+            <pathelement path="${test.java.classes}" />
+          </classpath>
           <formatter type="${test.junit.output.format}" />
           <batchtest todir="${test.log.dir}" if="quicktest">
-            <fileset refid="quicktest.files" />
+            <fileset dir="${test.src.dir}">
+              <include name="**/*${test.category}Test.java"/>
+              <exclude name="**/*HammerTest.java"/>
+            </fileset>
           </batchtest>
           <batchtest todir="${test.log.dir}" if="fulltest">
-            <fileset refid="fulltest.files" />
+            <fileset dir="${test.src.dir}">
+              <include name="**/*${test.category}Test.java"/>
+            </fileset>
           </batchtest>
           <batchtest todir="${test.log.dir}" if="testcase">
-            <fileset refid="testcase.files" />
+            <fileset dir="${test.src.dir}" includes="**/${testcase}.java"/>
           </batchtest>
         </junit>
         <fail if="tests.failed">Tests failed!</fail>
@@ -1463,7 +1365,7 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
                 <env key="CALLER" value="ANT"/>
                 <env key="CLOVER_HOME" value="${clover.home}"/>
                 <env key="base_dir" value="${basedir}"/>
-		<arg line="clean check"/>
+		<arg line="clean run-check"/>
 	</exec>
     </target>
    
@@ -1692,7 +1594,6 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
     <target name="releaseaudit" depends="package,rats-taskdef" description="Release Audit activities">
       <rat:report xmlns:rat="antlib:org.apache.rat.anttasks">
         <fileset dir="${dist.dir}">
-          <exclude name="**/*.cer"/>
           <exclude name="**/*.m4"/>
           <exclude name="**/*.md5"/>
           <exclude name="**/*.pom"/>
@@ -1706,14 +1607,10 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
           <exclude name="**/compile"/>
           <exclude name="**/depcomp"/>
           <exclude name="**/install-sh"/>
-          <exclude name="**/log4j.properties"/>
           <exclude name="**/ltmain.sh"/>
           <exclude name="**/missing"/>
           <exclude name="**/wrappers*.opt"/>
           <exclude name="CHANGES.txt"/>
-          <exclude name="**/README.md"/>
-          <exclude name="README_packaging.txt"/>
-          <exclude name="**/TODO"/>
           <exclude name="**/VERSION"/>
           <exclude name="**/ChangeLog"/>
           <exclude name="**/OldChangeLog"/>
@@ -1722,32 +1619,14 @@ xmlns:maven="antlib:org.apache.maven.artifact.ant">
           <exclude name="**/conf/*"/>
           <exclude name="**/docs/"/>
           <exclude name="**/lib/jdiff/"/>
-          <exclude name="contrib/ZooInspector/src/java/com/nitido/utils/toaster/Toaster.java"/>
-          <exclude name="src/c/*.la"/>
-          <exclude name="src/c/*.lo"/>
-          <exclude name="src/c/.libs/"/>
           <exclude name="src/c/autom4te.cache/**"/>
           <exclude name="src/c/config**"/>
-          <exclude name="src/c/include/winstdint.h"/>
           <exclude name="src/c/src/hashtable/"/>
-          <exclude name="src/c/test-driver"/>
-          <exclude name="src/c/tests/quorum.cfg"/>
-          <exclude name="src/contrib/loggraph/web/org/apache/zookeeper/graph/resources/date.format.js"/>
-          <exclude name="src/contrib/loggraph/web/org/apache/zookeeper/graph/resources/g.bar.js"/>
-          <exclude name="src/contrib/loggraph/web/org/apache/zookeeper/graph/resources/g.dot.js"/>
-          <exclude name="src/contrib/loggraph/web/org/apache/zookeeper/graph/resources/g.line.js"/>
-          <exclude name="src/contrib/loggraph/web/org/apache/zookeeper/graph/resources/g.pie.js"/>
-          <exclude name="src/contrib/loggraph/web/org/apache/zookeeper/graph/resources/g.raphael.js"/>
-          <exclude name="src/contrib/loggraph/web/org/apache/zookeeper/graph/resources/raphael.js"/>
-          <exclude name="src/contrib/loggraph/web/org/apache/zookeeper/graph/resources/yui-min.js"/>
-          <exclude name="src/contrib/monitoring/JMX-RESOURCES"/>
-          <exclude name="src/contrib/zooinspector/src/java/com/nitido/utils/toaster/Toaster.java"/>
           <exclude name="src/java/generated/.generated/"/>
           <exclude name="src/java/test/checkstyle*.xml"/>
           <exclude name="src/java/test/checkstyle*.xsl"/>
           <exclude name="src/java/test/config/findbugs*.xml"/>
           <exclude name="src/**/*.vcproj"/>
-          <exclude name="src/**/*.vcxproj*"/>
           <exclude name="src/**/*.sln"/>
         </fileset>
       </rat:report>

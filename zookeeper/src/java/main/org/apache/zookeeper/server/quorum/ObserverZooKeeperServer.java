@@ -46,13 +46,21 @@ public class ObserverZooKeeperServer extends LearnerZooKeeperServer {
     private boolean syncRequestProcessorEnabled = this.self.getSyncEnabled();
     
     /*
+     * Request processors
+     */
+    private CommitProcessor commitProcessor;
+    private SyncRequestProcessor syncProcessor;
+    
+    /*
      * Pending sync requests
      */
     ConcurrentLinkedQueue<Request> pendingSyncs = 
         new ConcurrentLinkedQueue<Request>();
-
-    ObserverZooKeeperServer(FileTxnSnapLog logFactory, QuorumPeer self, ZKDatabase zkDb) throws IOException {
-        super(logFactory, self.tickTime, self.minSessionTimeout, self.maxSessionTimeout, zkDb, self);
+        
+    ObserverZooKeeperServer(FileTxnSnapLog logFactory, QuorumPeer self,
+            DataTreeBuilder treeBuilder, ZKDatabase zkDb) throws IOException {
+        super(logFactory, self.tickTime, self.minSessionTimeout,
+                self.maxSessionTimeout, treeBuilder, zkDb, self);
         LOG.info("syncEnabled =" + syncRequestProcessorEnabled);
     }
     
@@ -92,8 +100,7 @@ public class ObserverZooKeeperServer extends LearnerZooKeeperServer {
         // Currently, they behave almost exactly the same as followers.
         RequestProcessor finalProcessor = new FinalRequestProcessor(this);
         commitProcessor = new CommitProcessor(finalProcessor,
-                Long.toString(getServerId()), true,
-                getZooKeeperServerListener());
+                Long.toString(getServerId()), true);
         commitProcessor.start();
         firstProcessor = new ObserverRequestProcessor(this, commitProcessor);
         ((ObserverRequestProcessor) firstProcessor).start();
@@ -131,11 +138,7 @@ public class ObserverZooKeeperServer extends LearnerZooKeeperServer {
     };    
 
     @Override
-    public synchronized void shutdown() {
-        if (!isRunning()) {
-            LOG.debug("ZooKeeper server is not running, so not proceeding to shutdown!");
-            return;
-        }
+    public void shutdown() {
         super.shutdown();
         if (syncRequestProcessorEnabled && syncProcessor != null) {
             syncProcessor.shutdown();

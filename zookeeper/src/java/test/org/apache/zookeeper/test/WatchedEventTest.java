@@ -29,7 +29,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 public class WatchedEventTest extends ZKTestCase {
-
+    
     @Test
     public void testCreatingWatchedEvent() {
         // EventWatch is a simple, immutable type, so all we need to do
@@ -46,6 +46,7 @@ public class WatchedEventTest extends ZKTestCase {
                Assert.assertEquals(ks, we.getState());
                Assert.assertEquals("blah", we.getPath());
            }
+            
         }
     }
 
@@ -75,7 +76,7 @@ public class WatchedEventTest extends ZKTestCase {
 
        try {
            WatcherEvent wep = new WatcherEvent(-2342, -252352, "foo");
-           new WatchedEvent(wep);
+           WatchedEvent we = new WatchedEvent(wep);
            Assert.fail("Was able to create WatchedEvent from bad wrapper");
        } catch (RuntimeException re) {
            // we're good
@@ -86,7 +87,7 @@ public class WatchedEventTest extends ZKTestCase {
    public void testConvertingToEventWrapper() {
        WatchedEvent we = new WatchedEvent(EventType.NodeCreated, KeeperState.Expired, "blah");
        WatcherEvent wew = we.getWrapper();
-
+       
        Assert.assertEquals(EventType.NodeCreated.getIntValue(), wew.getType());
        Assert.assertEquals(KeeperState.Expired.getIntValue(), wew.getState());
        Assert.assertEquals("blah", wew.getPath());

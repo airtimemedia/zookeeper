@@ -19,7 +19,10 @@
 #define __RECORDIO_H__
 
 #include <sys/types.h>
-#ifdef WIN32
+#ifndef WIN32
+#define STRUCT_INITIALIZER(l,r) .l = r
+#else
+#define STRUCT_INITIALIZER(l,r)  r
 #include "winconfig.h"
 #endif
 
@@ -70,7 +73,12 @@ void close_buffer_iarchive(struct iarchive **ia);
 char *get_buffer(struct oarchive *);
 int get_buffer_len(struct oarchive *);
 
-int64_t zoo_htonll(int64_t v);
+// airtime: start
+#ifdef htonll  // Mac's arpa/inet.h defines this
+# undef htonll
+#endif  // htonll
+// airtime: end
+int64_t htonll(int64_t v);
 
 #ifdef __cplusplus
 }

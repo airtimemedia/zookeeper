@@ -21,11 +21,11 @@ package org.apache.zookeeper.server.quorum;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.BindException;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketAddress;
 import java.net.SocketException;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -39,32 +39,32 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
 
 import org.apache.jute.BinaryOutputArchive;
-import org.apache.zookeeper.ZooDefs.OpCode;
-import org.apache.zookeeper.common.Time;
+import org.apache.zookeeper.server.ZooKeeperServer;
 import org.apache.zookeeper.server.FinalRequestProcessor;
 import org.apache.zookeeper.server.Request;
 import org.apache.zookeeper.server.RequestProcessor;
-import org.apache.zookeeper.server.ZooKeeperCriticalThread;
 import org.apache.zookeeper.server.quorum.QuorumPeer.LearnerType;
 import org.apache.zookeeper.server.quorum.flexible.QuorumVerifier;
 import org.apache.zookeeper.server.util.ZxidUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-
 /**
  * This class has the control logic for the Leader.
  */
 public class Leader {
     private static final Logger LOG = LoggerFactory.getLogger(Leader.class);
-
+    
     static final private boolean nodelay = System.getProperty("leader.nodelay", "true").equals("true");
     static {
         LOG.info("TCP NoDelay set to: " + nodelay);
     }
 
-    static public class Proposal  extends SyncedLearnerTracker {
+    static public class Proposal {
         public QuorumPacket packet;
+
+        public HashSet<Long> ackSet = new HashSet<Long>();
+
         public Request request;
 
         @Override
@@ -73,30 +73,15 @@ public class Leader {
         }
     }
 
-    // Throttle when there are too many concurrent snapshots being sent to observers
-    private static final String MAX_CONCURRENT_SNAPSHOTS = "zookeeper.leader.maxConcurrentSnapshots";
-    private static final int maxConcurrentSnapshots;
-    private static final String MAX_CONCURRENT_SNAPSHOT_TIMEOUT = "zookeeper.leader.maxConcurrentSnapshotTimeout";
-    private static final long maxConcurrentSnapshotTimeout;
-    static {
-        maxConcurrentSnapshots = Integer.getInteger(MAX_CONCURRENT_SNAPSHOTS, 10);
-        LOG.info(MAX_CONCURRENT_SNAPSHOTS + " = " + maxConcurrentSnapshots);
-        maxConcurrentSnapshotTimeout = Long.getLong(MAX_CONCURRENT_SNAPSHOT_TIMEOUT, 5);
-        LOG.info(MAX_CONCURRENT_SNAPSHOT_TIMEOUT + " = " + maxConcurrentSnapshotTimeout);
-    }
-
-    private final LearnerSnapshotThrottler learnerSnapshotThrottler = 
-        new LearnerSnapshotThrottler(maxConcurrentSnapshots, maxConcurrentSnapshotTimeout);
-
     final LeaderZooKeeperServer zk;
 
     final QuorumPeer self;
 
     private boolean quorumFormed = false;
-
+    
     // the follower acceptor thread
-    volatile LearnerCnxAcceptor cnxAcceptor = null;
-
+    LearnerCnxAcceptor cnxAcceptor;
+    
     // list of all the followers
     private final HashSet<LearnerHandler> learners =
         new HashSet<LearnerHandler>();
@@ -113,7 +98,7 @@ public class Leader {
     // list of followers that are ready to follow (i.e synced with the leader)
     private final HashSet<LearnerHandler> forwardingFollowers =
         new HashSet<LearnerHandler>();
-
+    
     /**
      * Returns a copy of the current forwarding follower snapshot
      */
@@ -131,7 +116,7 @@ public class Leader {
 
     private final HashSet<LearnerHandler> observingLearners =
         new HashSet<LearnerHandler>();
-
+        
     /**
      * Returns a copy of the current observer snapshot
      */
@@ -150,7 +135,7 @@ public class Leader {
     // Pending sync requests. Must access under 'this' lock.
     private final HashMap<Long,List<LearnerSyncRequest>> pendingSyncs =
         new HashMap<Long,List<LearnerSyncRequest>>();
-
+    
     synchronized public int getNumPendingSyncs() {
         return pendingSyncs.size();
     }
@@ -160,7 +145,7 @@ public class Leader {
 
     /**
      * Adds peer to the leader.
-     *
+     * 
      * @param learner
      *                instance of learner handle
      */
@@ -172,13 +157,13 @@ public class Leader {
 
     /**
      * Remove the learner from the learner list
-     *
+     * 
      * @param peer
      */
     void removeLearnerHandler(LearnerHandler peer) {
         synchronized (forwardingFollowers) {
-            forwardingFollowers.remove(peer);
-        }
+            forwardingFollowers.remove(peer);            
+        }        
         synchronized (learners) {
             learners.remove(peer);
         }
@@ -190,31 +175,10 @@ public class Leader {
     boolean isLearnerSynced(LearnerHandler peer){
         synchronized (forwardingFollowers) {
             return forwardingFollowers.contains(peer);
-        }
-    }
-
-
-    /**
-     * Returns true if a quorum in qv is connected and synced with the leader
-     * and false otherwise
-     *  
-     * @param qv, a QuorumVerifier
-     */
-    public boolean isQuorumSynced(QuorumVerifier qv) {
-       HashSet<Long> ids = new HashSet<Long>();
-       if (qv.getVotingMembers().containsKey(self.getId()))
-           ids.add(self.getId());
-       synchronized (forwardingFollowers) {
-           for (LearnerHandler learnerHandler: forwardingFollowers){
-               if (learnerHandler.synced() && qv.getVotingMembers().containsKey(learnerHandler.getSid())){
-                   ids.add(learnerHandler.getSid());
-               }
-           }
-       }
-       return qv.containsQuorum(ids);
+        }        
     }
     
-    private final ServerSocket ss;
+    ServerSocket ss;
 
     Leader(QuorumPeer self,LeaderZooKeeperServer zk) throws IOException {
         this.self = self;
@@ -236,29 +200,29 @@ public class Leader {
             }
             throw e;
         }
-        this.zk = zk;
+        this.zk=zk;
     }
 
     /**
      * This message is for follower to expect diff
      */
     final static int DIFF = 13;
-
+    
     /**
-     * This is for follower to truncate its logs
+     * This is for follower to truncate its logs 
      */
     final static int TRUNC = 14;
-
+    
     /**
      * This is for follower to download the snapshots
      */
     final static int SNAP = 15;
-
+    
     /**
      * This tells the leader that the connecting peer is actually an observer
      */
     final static int OBSERVERINFO = 16;
-
+    
     /**
      * This message type is sent by the leader to indicate it's zxid and if
      * needed, its database.
@@ -287,7 +251,7 @@ public class Leader {
      * This message is used by the follow to ack a proposed epoch.
      */
     public static final int ACKEPOCH = 18;
-
+    
     /**
      * This message type is sent to a leader to request and mutation operation.
      * The payload will consist of a request header followed by a request.
@@ -326,36 +290,21 @@ public class Leader {
      * between the leader and the follower.
      */
     final static int SYNC = 7;
-
+        
     /**
      * This message type informs observers of a committed proposal.
      */
     final static int INFORM = 8;
-    
-    /**
-     * Similar to COMMIT, only for a reconfig operation.
-     */
-    final static int COMMITANDACTIVATE = 9;
-    
-    /**
-     * Similar to INFORM, only for a reconfig operation.
-     */
-    final static int INFORMANDACTIVATE = 19;
-    
-    final ConcurrentMap<Long, Proposal> outstandingProposals = new ConcurrentHashMap<Long, Proposal>();
 
-    private final ConcurrentLinkedQueue<Proposal> toBeApplied = new ConcurrentLinkedQueue<Proposal>();
+    ConcurrentMap<Long, Proposal> outstandingProposals = new ConcurrentHashMap<Long, Proposal>();
 
-    private final Proposal newLeaderProposal = new Proposal();
+    ConcurrentLinkedQueue<Proposal> toBeApplied = new ConcurrentLinkedQueue<Proposal>();
 
-    class LearnerCnxAcceptor extends ZooKeeperCriticalThread {
+    Proposal newLeaderProposal = new Proposal();
+    
+    class LearnerCnxAcceptor extends Thread{
         private volatile boolean stop = false;
-
-        public LearnerCnxAcceptor() {
-            super("LearnerCnxAcceptor-" + ss.getLocalSocketAddress(), zk
-                    .getZooKeeperServerListener());
-        }
-
+        
         @Override
         public void run() {
             try {
@@ -383,32 +332,29 @@ public class Leader {
                     }
                 }
             } catch (Exception e) {
-                LOG.warn("Exception while accepting follower", e.getMessage());
-                handleException(this.getName(), e);
+                LOG.warn("Exception while accepting follower", e);
             }
         }
-
+        
         public void halt() {
             stop = true;
         }
     }
 
     StateSummary leaderStateSummary;
-
+    
     long epoch = -1;
     boolean waitingForNewEpoch = true;
-
-    // when a reconfig occurs where the leader is removed or becomes an observer, 
-   // it does not commit ops after committing the reconfig
-    boolean allowedToCommit = true;     
+    volatile boolean readyToStart = false;
+    
     /**
      * This method is main function that is called to lead
-     *
+     * 
      * @throws IOException
      * @throws InterruptedException
      */
     void lead() throws IOException, InterruptedException {
-        self.end_fle = Time.currentElapsedTime();
+        self.end_fle = System.currentTimeMillis();
         LOG.info("LEADING - LEADER ELECTION TOOK - " +
               (self.end_fle - self.start_fle));
         self.start_fle = 0;
@@ -417,104 +363,60 @@ public class Leader {
         zk.registerJMX(new LeaderBean(this, zk), self.jmxLocalPeerBean);
 
         try {
-            self.tick.set(0);
+            self.tick = 0;
             zk.loadData();
-
+            
             leaderStateSummary = new StateSummary(self.getCurrentEpoch(), zk.getLastProcessedZxid());
 
-            // Start thread that waits for connection requests from
+            // Start thread that waits for connection requests from 
             // new followers.
             cnxAcceptor = new LearnerCnxAcceptor();
             cnxAcceptor.start();
-
+            
+            readyToStart = true;
             long epoch = getEpochToPropose(self.getId(), self.getAcceptedEpoch());
-
+            
             zk.setZxid(ZxidUtils.makeZxid(epoch, 0));
-
+            
             synchronized(this){
                 lastProposed = zk.getZxid();
             }
-
+            
             newLeaderProposal.packet = new QuorumPacket(NEWLEADER, zk.getZxid(),
-                   null, null);
+                    null, null);
 
 
             if ((newLeaderProposal.packet.getZxid() & 0xffffffffL) != 0) {
                 LOG.info("NEWLEADER proposal has Zxid of "
                         + Long.toHexString(newLeaderProposal.packet.getZxid()));
             }
+            
+            waitForEpochAck(self.getId(), leaderStateSummary);
+            self.setCurrentEpoch(epoch);
 
-            QuorumVerifier lastSeenQV = self.getLastSeenQuorumVerifier();
-            QuorumVerifier curQV = self.getQuorumVerifier();
-            if (curQV.getVersion() == 0 && curQV.getVersion() == lastSeenQV.getVersion()) {
-                // This was added in ZOOKEEPER-1783. The initial config has version 0 (not explicitly
-                // specified by the user; the lack of version in a config file is interpreted as version=0). 
-                // As soon as a config is established we would like to increase its version so that it
-                // takes presedence over other initial configs that were not established (such as a config
-                // of a server trying to join the ensemble, which may be a partial view of the system, not the full config). 
-                // We chose to set the new version to the one of the NEWLEADER message. However, before we can do that
-                // there must be agreement on the new version, so we can only change the version when sending/receiving UPTODATE,
-                // not when sending/receiving NEWLEADER. In other words, we can't change curQV here since its the committed quorum verifier, 
-                // and there's still no agreement on the new version that we'd like to use. Instead, we use 
-                // lastSeenQuorumVerifier which is being sent with NEWLEADER message
-                // so its a good way to let followers know about the new version. (The original reason for sending 
-                // lastSeenQuorumVerifier with NEWLEADER is so that the leader completes any potentially uncommitted reconfigs
-                // that it finds before starting to propose operations. Here we're reusing the same code path for 
-                // reaching consensus on the new version number.)
-                
-                // It is important that this is done before the leader executes waitForEpochAck,
-                // so before LearnerHandlers return from their waitForEpochAck
-                // hence before they construct the NEWLEADER message containing
-                // the last-seen-quorumverifier of the leader, which we change below
-               try {
-                   QuorumVerifier newQV = self.configFromString(curQV.toString());
-                   newQV.setVersion(zk.getZxid());
-                   self.setLastSeenQuorumVerifier(newQV, true);    
-               } catch (Exception e) {
-                   throw new IOException(e);
-               }
-            }
-            
-            newLeaderProposal.addQuorumVerifier(self.getQuorumVerifier());
-            if (self.getLastSeenQuorumVerifier().getVersion() > self.getQuorumVerifier().getVersion()){
-               newLeaderProposal.addQuorumVerifier(self.getLastSeenQuorumVerifier());
-            }
-            
             // We have to get at least a majority of servers in sync with
             // us. We do this by waiting for the NEWLEADER packet to get
             // acknowledged
-                       
-             waitForEpochAck(self.getId(), leaderStateSummary);
-             self.setCurrentEpoch(epoch);    
+            try {
+                waitForNewLeaderAck(self.getId(), zk.getZxid(), LearnerType.PARTICIPANT);
+            } catch (InterruptedException e) {
+                shutdown("Waiting for a quorum of followers, only synced with sids: [ "
+                        + getSidSetString(newLeaderProposal.ackSet) + " ]");
+                HashSet<Long> followerSet = new HashSet<Long>();
+                for (LearnerHandler f : learners)
+                    followerSet.add(f.getSid());
+                    
+                if (self.getQuorumVerifier().containsQuorum(followerSet)) {
+                    LOG.warn("Enough followers present. "
+                            + "Perhaps the initTicks need to be increased.");
+                }
+                Thread.sleep(self.tickTime);
+                self.tick++;
+                return;
+            }
             
-             try {
-                 waitForNewLeaderAck(self.getId(), zk.getZxid(), LearnerType.PARTICIPANT);
-             } catch (InterruptedException e) {
-                 shutdown("Waiting for a quorum of followers, only synced with sids: [ "
-                         + newLeaderProposal.ackSetsToString() + " ]");
-                 HashSet<Long> followerSet = new HashSet<Long>();
-
-                 for(LearnerHandler f : getLearners()) {
-                     if (self.getQuorumVerifier().getVotingMembers().containsKey(f.getSid())){
-                         followerSet.add(f.getSid());
-                     }
-                 }    
-                 boolean initTicksShouldBeIncreased = true;
-                 for (Proposal.QuorumVerifierAcksetPair qvAckset:newLeaderProposal.qvAcksetPairs) {
-                     if (!qvAckset.getQuorumVerifier().containsQuorum(followerSet)) {
-                         initTicksShouldBeIncreased = false;
-                         break;
-                     }
-                 }                  
-                 if (initTicksShouldBeIncreased) {
-                     LOG.warn("Enough followers present. "+
-                             "Perhaps the initTicks need to be increased.");
-                 }
-                 return;
-             }
-
-             startZkServer();
-             
+            startZkServer();
+            
             /**
              * WARNING: do not use this for anything other than QA testing
              * on a real cluster. Specifically to enable verification that quorum
@@ -522,7 +424,7 @@ public class Leader {
              * ZOOKEEPER-1277. Without this option it would take a very long
              * time (on order of a month say) to see the 4 billion writes
              * necessary to cause the roll-over to occur.
-             *
+             * 
              * This field allows you to override the zxid of the server. Typically
              * you'll want to set it to something like 0xfffffff0 and then
              * start the quorum, run some operations and see the re-election.
@@ -532,13 +434,10 @@ public class Leader {
                 long zxid = Long.parseLong(initialZxid);
                 zk.setZxid((zk.getZxid() & 0xffffffff00000000L) | zxid);
             }
-
+            
             if (!System.getProperty("zookeeper.leaderServes", "yes").equals("no")) {
-                self.setZooKeeperServer(zk);
+                self.cnxnFactory.setZooKeeperServer(zk);
             }
-
-            self.adminServer.setZooKeeperServer(zk);
-
             // Everything is a go, simply start counting the ticks
             // WARNING: I couldn't find any wait statement on a synchronized
             // block that would be notified by this notifyAll() call, so
@@ -549,55 +448,36 @@ public class Leader {
             // We ping twice a tick, so we only update the tick every other
             // iteration
             boolean tickSkip = true;
-
+    
             while (true) {
-                synchronized (this) {
-                    long start = Time.currentElapsedTime();
-                    long cur = start;
-                    long end = start + self.tickTime / 2;
-                    while (cur < end) {
-                        wait(end - cur);
-                        cur = Time.currentElapsedTime();
-                    }
-
-                    if (!tickSkip) {
-                        self.tick.incrementAndGet();
-                    }
-
-                    // We use an instance of SyncedLearnerTracker to
-                    // track synced learners to make sure we still have a
-                    // quorum of current (and potentially next pending) view.
-                    SyncedLearnerTracker syncedAckSet = new SyncedLearnerTracker();
-                    syncedAckSet.addQuorumVerifier(self.getQuorumVerifier());
-                    if (self.getLastSeenQuorumVerifier() != null
-                            && self.getLastSeenQuorumVerifier().getVersion() > self
-                                    .getQuorumVerifier().getVersion()) {
-                        syncedAckSet.addQuorumVerifier(self
-                                .getLastSeenQuorumVerifier());
-                    }
-
-                    syncedAckSet.addAck(self.getId());
-
-                    for (LearnerHandler f : getLearners()) {
-                        if (f.synced()) {
-                            syncedAckSet.addAck(f.getSid());
-                        }
-                    }
-
-                    if (!tickSkip && !syncedAckSet.hasAllQuorums()) {
-                        // Lost quorum of last committed and/or last proposed
-                        // config, shutdown
-                        shutdown("Not sufficient followers synced, only synced with sids: [ "
-                                + syncedAckSet.ackSetsToString() + " ]");
-                        // make sure the order is the same!
-                        // the leader goes to looking
-                        return;
-                    }
-                    tickSkip = !tickSkip;
+                Thread.sleep(self.tickTime / 2);
+                if (!tickSkip) {
+                    self.tick++;
                 }
+                HashSet<Long> syncedSet = new HashSet<Long>();
+
+                // lock on the followers when we use it.
+                syncedSet.add(self.getId());
+
                 for (LearnerHandler f : getLearners()) {
+                    // Synced set is used to check we have a supporting quorum, so only
+                    // PARTICIPANT, not OBSERVER, learners should be used
+                    if (f.synced() && f.getLearnerType() == LearnerType.PARTICIPANT) {
+                        syncedSet.add(f.getSid());
+                    }
                     f.ping();
                 }
+
+              if (!tickSkip && !self.getQuorumVerifier().containsQuorum(syncedSet)) {
+                //if (!tickSkip && syncedCount < self.quorumPeers.size() / 2) {
+                    // Lost quorum, shutdown
+                    shutdown("Not sufficient followers synced, only synced with sids: [ "
+                            + getSidSetString(syncedSet) + " ]");
+                    // make sure the order is the same!
+                    // the leader goes to looking
+                    return;
+              } 
+              tickSkip = !tickSkip;
             }
         } finally {
             zk.unregisterJMX(this);
@@ -615,23 +495,23 @@ public class Leader {
         if (isShutdown) {
             return;
         }
-
+        
         LOG.info("Shutdown called",
                 new Exception("shutdown Leader! reason: " + reason));
 
         if (cnxAcceptor != null) {
             cnxAcceptor.halt();
         }
-
+        
         // NIO should not accept conenctions
-        self.setZooKeeperServer(null);
-        self.adminServer.setZooKeeperServer(null);
+        self.cnxnFactory.setZooKeeperServer(null);
         try {
             ss.close();
         } catch (IOException e) {
             LOG.warn("Ignoring unexpected exception during close",e);
         }
-        self.closeAllConnections();
+        // clear all the connections
+        self.cnxnFactory.closeAll();
         // shutdown the previous zk
         if (zk != null) {
             zk.shutdown();
@@ -647,142 +527,15 @@ public class Leader {
         isShutdown = true;
     }
 
-    /** In a reconfig operation, this method attempts to find the best leader for next configuration.
-     *  If the current leader is a voter in the next configuartion, then it remains the leader.
-     *  Otherwise, choose one of the new voters that acked the reconfiguartion, such that it is as   
-     * up-to-date as possible, i.e., acked as many outstanding proposals as possible.
-     *  
-     * @param reconfigProposal
-     * @param zxid of the reconfigProposal
-     * @return server if of the designated leader
-     */
-    
-    private long getDesignatedLeader(Proposal reconfigProposal, long zxid) {
-       //new configuration
-       Proposal.QuorumVerifierAcksetPair newQVAcksetPair = reconfigProposal.qvAcksetPairs.get(reconfigProposal.qvAcksetPairs.size()-1);        
-       
-       //check if I'm in the new configuration with the same quorum address - 
-       // if so, I'll remain the leader    
-       if (newQVAcksetPair.getQuorumVerifier().getVotingMembers().containsKey(self.getId()) && 
-               newQVAcksetPair.getQuorumVerifier().getVotingMembers().get(self.getId()).addr.equals(self.getQuorumAddress())){  
-           return self.getId();
-       }
-       // start with an initial set of candidates that are voters from new config that 
-       // acknowledged the reconfig op (there must be a quorum). Choose one of them as 
-       // current leader candidate
-       HashSet<Long> candidates = new HashSet<Long>(newQVAcksetPair.getAckset());
-       candidates.remove(self.getId()); // if we're here, I shouldn't be the leader
-       long curCandidate = candidates.iterator().next();
-       
-       //go over outstanding ops in order, and try to find a candidate that acked the most ops.
-       //this way it will be the most up-to-date and we'll minimize the number of ops that get dropped
-       
-       long curZxid = zxid + 1;
-       Proposal p = outstandingProposals.get(curZxid);
-               
-       while (p!=null && !candidates.isEmpty()) {                              
-           for (Proposal.QuorumVerifierAcksetPair qvAckset: p.qvAcksetPairs){ 
-               //reduce the set of candidates to those that acknowledged p
-               candidates.retainAll(qvAckset.getAckset());
-               //no candidate acked p, return the best candidate found so far
-               if (candidates.isEmpty()) return curCandidate;
-               //update the current candidate, and if it is the only one remaining, return it
-               curCandidate = candidates.iterator().next();
-               if (candidates.size() == 1) return curCandidate;
-           }      
-           curZxid++;
-           p = outstandingProposals.get(curZxid);
-       }
-       
-       return curCandidate;
-    }
-
-    /**
-     * @return True if committed, otherwise false.
-     * @param a proposal p
-     **/
-    synchronized public boolean tryToCommit(Proposal p, long zxid, SocketAddress followerAddr) {       
-       // make sure that ops are committed in order. With reconfigurations it is now possible
-       // that different operations wait for different sets of acks, and we still want to enforce
-       // that they are committed in order. Currently we only permit one outstanding reconfiguration
-       // such that the reconfiguration and subsequent outstanding ops proposed while the reconfig is
-       // pending all wait for a quorum of old and new config, so its not possible to get enough acks
-       // for an operation without getting enough acks for preceding ops. But in the future if multiple
-       // concurrent reconfigs are allowed, this can happen.
-       if (outstandingProposals.containsKey(zxid - 1)) return false;
-       
-       // getting a quorum from all necessary configurations
-        if (!p.hasAllQuorums()) {
-           return false;                 
-        }
-        
-        // commit proposals in order
-        if (zxid != lastCommitted+1) {    
-           LOG.warn("Commiting zxid 0x" + Long.toHexString(zxid)
-                    + " from " + followerAddr + " not first!");
-            LOG.warn("First is "
-                    + (lastCommitted+1));
-        }     
-        
-        // in order to be committed, a proposal must be accepted by a quorum              
-        
-        outstandingProposals.remove(zxid);
-        
-        if (p.request != null) {
-             toBeApplied.add(p);
-        }
-
-        if (p.request == null) {
-            LOG.warn("Going to commmit null: " + p);
-        } else if (p.request.getHdr().getType() == OpCode.reconfig) {                                   
-            LOG.debug("Committing a reconfiguration! " + outstandingProposals.size()); 
-                 
-            //if this server is voter in new config with the same quorum address, 
-            //then it will remain the leader
-            //otherwise an up-to-date follower will be designated as leader. This saves
-            //leader election time, unless the designated leader fails                             
-            Long designatedLeader = getDesignatedLeader(p, zxid);
-            //LOG.warn("designated leader is: " + designatedLeader);
-
-            QuorumVerifier newQV = p.qvAcksetPairs.get(p.qvAcksetPairs.size()-1).getQuorumVerifier();
-       
-            self.processReconfig(newQV, designatedLeader, zk.getZxid(), true);
-       
-            if (designatedLeader != self.getId()) {
-                allowedToCommit = false;
-            }
-                   
-            // we're sending the designated leader, and if the leader is changing the followers are 
-            // responsible for closing the connection - this way we are sure that at least a majority of them 
-            // receive the commit message.
-            commitAndActivate(zxid, designatedLeader);
-            informAndActivate(p, designatedLeader);
-            //turnOffFollowers();
-        } else {
-            commit(zxid);
-            inform(p);
-        }
-        zk.commitProcessor.commit(p.request);
-        if(pendingSyncs.containsKey(zxid)){
-            for(LearnerSyncRequest r: pendingSyncs.remove(zxid)) {
-                sendSync(r);
-            }               
-        } 
-        
-        return  true;   
-    }
-    
     /**
      * Keep a count of acks that are received by the leader for a particular
      * proposal
-     *
-     * @param zxid, the zxid of the proposal sent out
-     * @param sid, the id of the server that sent the ack
+     * 
+     * @param zxid
+     *                the zxid of the proposal sent out
      * @param followerAddr
      */
-    synchronized public void processAck(long sid, long zxid, SocketAddress followerAddr) {        
-        if (!allowedToCommit) return; // last op committed was a leader change - from now on 
-                                     // the new leader should commit        
+    synchronized public void processAck(long sid, long zxid, SocketAddress followerAddr) {
         if (LOG.isTraceEnabled()) {
             LOG.trace("Ack zxid: 0x{}", Long.toHexString(zxid));
             for (Proposal p : outstandingProposals.values()) {
@@ -792,17 +545,16 @@ public class Leader {
             }
             LOG.trace("outstanding proposals all");
         }
-        
+
         if ((zxid & 0xffffffffL) == 0) {
             /*
-             * We no longer process NEWLEADER ack with this method. However,
-             * the learner sends an ack back to the leader after it gets
-             * UPTODATE, so we just ignore the message.
+             * We no longer process NEWLEADER ack by this method. However,
+             * the learner sends ack back to the leader after it gets UPTODATE
+             * so we just ignore the message.
              */
             return;
         }
-            
-            
+    
         if (outstandingProposals.size() == 0) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("outstanding is 0");
@@ -824,48 +576,52 @@ public class Leader {
             return;
         }
         
-        p.addAck(sid);        
-        /*if (LOG.isDebugEnabled()) {
+        p.ackSet.add(sid);
+        if (LOG.isDebugEnabled()) {
             LOG.debug("Count for zxid: 0x{} is {}",
                     Long.toHexString(zxid), p.ackSet.size());
-        }*/
-        
-        boolean hasCommitted = tryToCommit(p, zxid, followerAddr);
+        }
+        if (self.getQuorumVerifier().containsQuorum(p.ackSet)){             
+            if (zxid != lastCommitted+1) {
+                LOG.warn("Commiting zxid 0x{} from {} not first!",
+                        Long.toHexString(zxid), followerAddr);
+                LOG.warn("First is 0x{}", Long.toHexString(lastCommitted + 1));
+            }
+            outstandingProposals.remove(zxid);
+            if (p.request != null) {
+                toBeApplied.add(p);
+            }
 
-        // If p is a reconfiguration, multiple other operations may be ready to be committed,
-        // since operations wait for different sets of acks.
-       // Currently we only permit one outstanding reconfiguration at a time
-       // such that the reconfiguration and subsequent outstanding ops proposed while the reconfig is
-       // pending all wait for a quorum of old and new config, so its not possible to get enough acks
-       // for an operation without getting enough acks for preceding ops. But in the future if multiple
-       // concurrent reconfigs are allowed, this can happen and then we need to check whether some pending
-        // ops may already have enough acks and can be committed, which is what this code does.
-
-        if (hasCommitted && p.request!=null && p.request.getHdr().getType() == OpCode.reconfig){
-               long curZxid = zxid;
-           while (allowedToCommit && hasCommitted && p!=null){
-               curZxid++;
-               p = outstandingProposals.get(curZxid);
-               if (p !=null) hasCommitted = tryToCommit(p, curZxid, null);             
-           }
+            if (p.request == null) {
+                LOG.warn("Going to commmit null request for proposal: {}", p);
+            }
+            commit(zxid);
+            inform(p);
+            zk.commitProcessor.commit(p.request);
+            if(pendingSyncs.containsKey(zxid)){
+                for(LearnerSyncRequest r: pendingSyncs.remove(zxid)) {
+                    sendSync(r);
+                }
+            }
         }
     }
-    
-    static class ToBeAppliedRequestProcessor implements RequestProcessor {
-        private final RequestProcessor next;
 
-        private final Leader leader;
+    static class ToBeAppliedRequestProcessor implements RequestProcessor {
+        private RequestProcessor next;
+
+        private ConcurrentLinkedQueue<Proposal> toBeApplied;
 
         /**
          * This request processor simply maintains the toBeApplied list. For
          * this to work next must be a FinalRequestProcessor and
          * FinalRequestProcessor.processRequest MUST process the request
          * synchronously!
-         *
+         * 
          * @param next
          *                a reference to the FinalRequestProcessor
          */
-        ToBeAppliedRequestProcessor(RequestProcessor next, Leader leader) {
+        ToBeAppliedRequestProcessor(RequestProcessor next,
+                ConcurrentLinkedQueue<Proposal> toBeApplied) {
             if (!(next instanceof FinalRequestProcessor)) {
                 throw new RuntimeException(ToBeAppliedRequestProcessor.class
                         .getName()
@@ -874,40 +630,28 @@ public class Leader {
                         + " not "
                         + next.getClass().getName());
             }
-            this.leader = leader;
+            this.toBeApplied = toBeApplied;
             this.next = next;
         }
 
         /*
          * (non-Javadoc)
-         *
+         * 
          * @see org.apache.zookeeper.server.RequestProcessor#processRequest(org.apache.zookeeper.server.Request)
          */
         public void processRequest(Request request) throws RequestProcessorException {
+            // request.addRQRec(">tobe");
             next.processRequest(request);
-
-            // The only requests that should be on toBeApplied are write
-            // requests, for which we will have a hdr. We can't simply use
-            // request.zxid here because that is set on read requests to equal
-            // the zxid of the last write op.
-            if (request.getHdr() != null) {
-                long zxid = request.getHdr().getZxid();
-                Iterator<Proposal> iter = leader.toBeApplied.iterator();
-                if (iter.hasNext()) {
-                    Proposal p = iter.next();
-                    if (p.request != null && p.request.zxid == zxid) {
-                        iter.remove();
-                        return;
-                    }
-                }
-                LOG.error("Committed request not found on toBeApplied: "
-                          + request);
+            Proposal p = toBeApplied.peek();
+            if (p != null && p.request != null
+                    && p.request.zxid == request.zxid) {
+                toBeApplied.remove();
             }
         }
 
         /*
          * (non-Javadoc)
-         *
+         * 
          * @see org.apache.zookeeper.server.RequestProcessor#shutdown()
          */
         public void shutdown() {
@@ -918,22 +662,22 @@ public class Leader {
 
     /**
      * send a packet to all the followers ready to follow
-     *
+     * 
      * @param qp
      *                the packet to be sent
      */
     void sendPacket(QuorumPacket qp) {
         synchronized (forwardingFollowers) {
-            for (LearnerHandler f : forwardingFollowers) {
+            for (LearnerHandler f : forwardingFollowers) {                
                 f.queuePacket(qp);
             }
         }
     }
-
+    
     /**
-     * send a packet to all observers
+     * send a packet to all observers     
      */
-    void sendObserverPacket(QuorumPacket qp) {
+    void sendObserverPacket(QuorumPacket qp) {        
         for (LearnerHandler f : getObservingLearners()) {
             f.queuePacket(qp);
         }
@@ -943,7 +687,7 @@ public class Leader {
 
     /**
      * Create a commit packet and send it to all the members of the quorum
-     *
+     * 
      * @param zxid
      */
     public void commit(long zxid) {
@@ -953,61 +697,30 @@ public class Leader {
         QuorumPacket qp = new QuorumPacket(Leader.COMMIT, zxid, null, null);
         sendPacket(qp);
     }
-
-    //commit and send some info
-    public void commitAndActivate(long zxid, long designatedLeader) {
-        synchronized(this){
-            lastCommitted = zxid;
-        }
-        
-        byte data[] = new byte[8];
-        ByteBuffer buffer = ByteBuffer.wrap(data);                            
-       buffer.putLong(designatedLeader);
-       
-        QuorumPacket qp = new QuorumPacket(Leader.COMMITANDACTIVATE, zxid, data, null);
-        sendPacket(qp);
-    }
-
+    
     /**
      * Create an inform packet and send it to all observers.
      * @param zxid
      * @param proposal
      */
-    public void inform(Proposal proposal) {
-        QuorumPacket qp = new QuorumPacket(Leader.INFORM, proposal.request.zxid,
+    public void inform(Proposal proposal) {   
+        QuorumPacket qp = new QuorumPacket(Leader.INFORM, proposal.request.zxid, 
                                             proposal.packet.getData(), null);
-        sendObserverPacket(qp);
-    }
-
-    
-    /**
-     * Create an inform&activate packet and send it to all observers.
-     * @param zxid
-     * @param proposal
-     */
-    public void informAndActivate(Proposal proposal, long designatedLeader) {
-       byte[] proposalData = proposal.packet.getData();
-        byte[] data = new byte[proposalData.length + 8];
-        ByteBuffer buffer = ByteBuffer.wrap(data);                            
-       buffer.putLong(designatedLeader);
-       buffer.put(proposalData);
-       
-        QuorumPacket qp = new QuorumPacket(Leader.INFORMANDACTIVATE, proposal.request.zxid, data, null);
         sendObserverPacket(qp);
     }
 
     long lastProposed;
 
-
+    
     /**
      * Returns the current epoch of the leader.
-     *
+     * 
      * @return
      */
     public long getEpoch(){
         return ZxidUtils.getEpochFromZxid(lastProposed);
     }
-
+    
     @SuppressWarnings("serial")
     public static class XidRolloverException extends Exception {
         public XidRolloverException(String message) {
@@ -1017,7 +730,7 @@ public class Leader {
 
     /**
      * create a proposal and send it out to all the members
-     *
+     * 
      * @param request
      * @return the proposal that is queued to send to all the members
      */
@@ -1036,32 +749,21 @@ public class Leader {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         BinaryOutputArchive boa = BinaryOutputArchive.getArchive(baos);
         try {
-            request.getHdr().serialize(boa, "hdr");
-            if (request.getTxn() != null) {
-                request.getTxn().serialize(boa, "txn");
+            request.hdr.serialize(boa, "hdr");
+            if (request.txn != null) {
+                request.txn.serialize(boa, "txn");
             }
             baos.close();
         } catch (IOException e) {
             LOG.warn("This really should be impossible", e);
         }
-        QuorumPacket pp = new QuorumPacket(Leader.PROPOSAL, request.zxid,
+        QuorumPacket pp = new QuorumPacket(Leader.PROPOSAL, request.zxid, 
                 baos.toByteArray(), null);
-
+        
         Proposal p = new Proposal();
         p.packet = pp;
-        p.request = request;                
-        
-        synchronized(this) {
-           p.addQuorumVerifier(self.getQuorumVerifier());
-                   
-           if (request.getHdr().getType() == OpCode.reconfig){
-               self.setLastSeenQuorumVerifier(request.qv, true);                       
-           }
-           
-           if (self.getQuorumVerifier().getVersion()<self.getLastSeenQuorumVerifier().getVersion()) {
-               p.addQuorumVerifier(self.getLastSeenQuorumVerifier());
-           }
-                   
+        p.request = request;
+        synchronized (this) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Proposing:: " + request);
             }
@@ -1072,17 +774,13 @@ public class Leader {
         }
         return p;
     }
-    
-    public LearnerSnapshotThrottler getLearnerSnapshotThrottler() {
-        return learnerSnapshotThrottler;
-    }
-
+            
     /**
      * Process sync requests
-     *
+     * 
      * @param r the request
      */
-
+    
     synchronized public void processSync(LearnerSyncRequest r){
         if(outstandingProposals.isEmpty()){
             sendSync(r);
@@ -1095,26 +793,25 @@ public class Leader {
             pendingSyncs.put(lastProposed, l);
         }
     }
-
+        
     /**
      * Sends a sync message to the appropriate server
-     *
+     * 
      * @param f
      * @param r
      */
-
+            
     public void sendSync(LearnerSyncRequest r){
         QuorumPacket qp = new QuorumPacket(Leader.SYNC, 0, null, null);
         r.fh.queuePacket(qp);
     }
-
+                
     /**
      * lets the leader know that a follower is capable of following and is done
      * syncing
-     *
+     * 
      * @param handler handler of the follower
      * @return last proposed zxid
-     * @throws InterruptedException 
      */
     synchronized public long startForwarding(LearnerHandler handler,
             long lastSeenZxid) {
@@ -1149,10 +846,11 @@ public class Leader {
         } else {
             addObserverLearnerHandler(handler);
         }
-
+                
         return lastProposed;
     }
-    private final HashSet<Long> connectingFollowers = new HashSet<Long>();
+
+    private HashSet<Long> connectingFollowers = new HashSet<Long>();
     public long getEpochToPropose(long sid, long lastAcceptedEpoch) throws InterruptedException, IOException {
         synchronized(connectingFollowers) {
             if (!waitingForNewEpoch) {
@@ -1163,28 +861,28 @@ public class Leader {
             }
             connectingFollowers.add(sid);
             QuorumVerifier verifier = self.getQuorumVerifier();
-            if (connectingFollowers.contains(self.getId()) &&
+            if (connectingFollowers.contains(self.getId()) && 
                                             verifier.containsQuorum(connectingFollowers)) {
                 waitingForNewEpoch = false;
                 self.setAcceptedEpoch(epoch);
                 connectingFollowers.notifyAll();
             } else {
-                long start = Time.currentElapsedTime();
+                long start = System.currentTimeMillis();
                 long cur = start;
                 long end = start + self.getInitLimit()*self.getTickTime();
                 while(waitingForNewEpoch && cur < end) {
                     connectingFollowers.wait(end - cur);
-                    cur = Time.currentElapsedTime();
+                    cur = System.currentTimeMillis();
                 }
                 if (waitingForNewEpoch) {
-                    throw new InterruptedException("Timeout while waiting for epoch from quorum");
+                    throw new InterruptedException("Timeout while waiting for epoch from quorum");        
                 }
             }
             return epoch;
         }
     }
 
-    private final HashSet<Long> electingFollowers = new HashSet<Long>();
+    private HashSet<Long> electingFollowers = new HashSet<Long>();
     private boolean electionFinished = false;
     public void waitForEpochAck(long id, StateSummary ss) throws IOException, InterruptedException {
         synchronized(electingFollowers) {
@@ -1205,13 +903,13 @@ public class Leader {
             if (electingFollowers.contains(self.getId()) && verifier.containsQuorum(electingFollowers)) {
                 electionFinished = true;
                 electingFollowers.notifyAll();
-            } else {
-                long start = Time.currentElapsedTime();
+            } else {                
+                long start = System.currentTimeMillis();
                 long cur = start;
                 long end = start + self.getInitLimit()*self.getTickTime();
                 while(!electionFinished && cur < end) {
                     electingFollowers.wait(end - cur);
-                    cur = Time.currentElapsedTime();
+                    cur = System.currentTimeMillis();
                 }
                 if (!electionFinished) {
                     throw new InterruptedException("Timeout while waiting for epoch to be acked by quorum");
@@ -1219,7 +917,7 @@ public class Leader {
             }
         }
     }
-    
+
     /**
      * Return a list of sid in set as string  
      */
@@ -1243,26 +941,9 @@ public class Leader {
         // Update lastCommitted and Db's zxid to a value representing the new epoch
         lastCommitted = zk.getZxid();
         LOG.info("Have quorum of supporters, sids: [ "
-                + newLeaderProposal.ackSetsToString()
+                + getSidSetString(newLeaderProposal.ackSet)
                 + " ]; starting up and setting last processed zxid: 0x{}",
                 Long.toHexString(zk.getZxid()));
-        
-        /*
-         * ZOOKEEPER-1324. the leader sends the new config it must complete
-         *  to others inside a NEWLEADER message (see LearnerHandler where
-         *  the NEWLEADER message is constructed), and once it has enough
-         *  acks we must execute the following code so that it applies the
-         *  config to itself.
-         */
-        QuorumVerifier newQV = self.getLastSeenQuorumVerifier();
-        
-        Long designatedLeader = getDesignatedLeader(newLeaderProposal, zk.getZxid());                                         
-        
-        self.processReconfig(newQV, designatedLeader, zk.getZxid(), true);
-        if (designatedLeader != self.getId()) {
-            allowedToCommit = false;
-        }
-        
         zk.startup();
         /*
          * Update the election vote here to ensure that all members of the
@@ -1287,7 +968,7 @@ public class Leader {
     public void waitForNewLeaderAck(long sid, long zxid, LearnerType learnerType)
             throws InterruptedException {
 
-        synchronized (newLeaderProposal.qvAcksetPairs) {
+        synchronized (newLeaderProposal.ackSet) {
 
             if (quorumFormed) {
                 return;
@@ -1302,22 +983,21 @@ public class Leader {
                 return;
             }
 
-            /*
-             * Note that addAck already checks that the learner
-             * is a PARTICIPANT.
-             */
-            newLeaderProposal.addAck(sid);
+            if (learnerType == LearnerType.PARTICIPANT) {
+                newLeaderProposal.ackSet.add(sid);
+            }
 
-            if (newLeaderProposal.hasAllQuorums()) {
+            if (self.getQuorumVerifier().containsQuorum(
+                    newLeaderProposal.ackSet)) {
                 quorumFormed = true;
-                newLeaderProposal.qvAcksetPairs.notifyAll();
+                newLeaderProposal.ackSet.notifyAll();
             } else {
-                long start = Time.currentElapsedTime();
+                long start = System.currentTimeMillis();
                 long cur = start;
                 long end = start + self.getInitLimit() * self.getTickTime();
                 while (!quorumFormed && cur < end) {
-                    newLeaderProposal.qvAcksetPairs.wait(end - cur);
-                    cur = Time.currentElapsedTime();
+                    newLeaderProposal.ackSet.wait(end - cur);
+                    cur = System.currentTimeMillis();
                 }
                 if (!quorumFormed) {
                     throw new InterruptedException(
@@ -1360,8 +1040,6 @@ public class Leader {
             return "ACK";
         case COMMIT:
             return "COMMIT";
-        case COMMITANDACTIVATE:
-            return "COMMITANDACTIVATE";           
         case PING:
             return "PING";
         case REVALIDATE:
@@ -1370,8 +1048,6 @@ public class Leader {
             return "SYNC";
         case INFORM:
             return "INFORM";
-        case INFORMANDACTIVATE:
-            return "INFORMANDACTIVATE";
         default:
             return "UNKNOWN";
         }

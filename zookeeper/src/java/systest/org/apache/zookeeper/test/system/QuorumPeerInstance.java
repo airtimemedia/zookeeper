@@ -36,9 +36,6 @@ import org.apache.zookeeper.server.quorum.QuorumPeer.QuorumServer;
 
 class QuorumPeerInstance implements Instance {
     final private static Logger LOG = LoggerFactory.getLogger(QuorumPeerInstance.class);
-    private static final File testData = new File(
-        System.getProperty("test.data.dir", "build/test/data"));
-
     private static final int syncLimit = 3;
     private static final int initLimit = 3;
     private static final int tickTime = 2000;
@@ -52,14 +49,13 @@ class QuorumPeerInstance implements Instance {
     }
 
     InetSocketAddress clientAddr;
-    InetSocketAddress quorumLeaderAddr;
-    InetSocketAddress quorumLeaderElectionAddr;
+    InetSocketAddress quorumAddr;
     HashMap<Long, QuorumServer> peers;
     File snapDir, logDir;
 
     public QuorumPeerInstance() {
         try {
-            File tmpFile = File.createTempFile("test", ".dir", testData);
+            File tmpFile = File.createTempFile("test", ".dir");
             File tmpDir = tmpFile.getParentFile();
             tmpFile.delete();
             File zkDirs = new File(tmpDir, "zktmp.cfg");
@@ -68,12 +64,7 @@ class QuorumPeerInstance implements Instance {
             Properties p;
             if (zkDirs.exists()) {
                 p = new Properties();
-                FileInputStream input = new FileInputStream(zkDirs);
-                try {
-                  p.load(input);
-                } finally {
-                  input.close();
-                }
+                p.load(new FileInputStream(zkDirs));
             } else {
                 p = System.getProperties();
             }
@@ -97,7 +88,7 @@ class QuorumPeerInstance implements Instance {
             // us which machine we are
             serverId = Integer.parseInt(parts[0]);
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Setting up server " + serverId);
+                LOG.info("Setting up server " + serverId);
             }
             if (parts.length > 1 && parts[1].equals("false")) {
                 System.setProperty("zookeeper.leaderServes", "no");
@@ -114,20 +105,13 @@ class QuorumPeerInstance implements Instance {
             }
             try {
                 ServerSocket ss = new ServerSocket(0, 1, InetAddress.getLocalHost());
-                quorumLeaderAddr = (InetSocketAddress) ss.getLocalSocketAddress();
+                quorumAddr = (InetSocketAddress) ss.getLocalSocketAddress();
                 ss.close();
             } catch(IOException e) {
                 e.printStackTrace();
             }
-            try {
-                ServerSocket ss = new ServerSocket(0, 1, InetAddress.getLocalHost());
-                quorumLeaderElectionAddr = (InetSocketAddress) ss.getLocalSocketAddress();
-                ss.close();
-            } catch(IOException e) {
-                e.printStackTrace();
-            }
-            String report = clientAddr.getHostString() + ':' + clientAddr.getPort() +
-            ',' + quorumLeaderAddr.getHostString() + ':' + quorumLeaderAddr.getPort() + ':' + quorumLeaderElectionAddr.getPort();
+            String report = clientAddr.getHostName() + ':' + clientAddr.getPort() +
+            ',' + quorumAddr.getHostName() + ':' + quorumAddr.getPort();
             try {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("Reporting " + report);
@@ -170,15 +154,8 @@ class QuorumPeerInstance implements Instance {
             String parts[] = quorumSpecs.split(",");
             peers = new HashMap<Long,QuorumServer>();
             for(int i = 0; i < parts.length; i++) {
-                // parts[i] == "host:leaderPort:leaderElectionPort;clientPort"
-                String subparts[] = ((parts[i].split(";"))[0]).split(":");
-                String clientPort = (parts[i].split(";"))[1];
-                peers.put(Long.valueOf(i),
-                          new QuorumServer(
-                                i,
-                                new InetSocketAddress(subparts[0], Integer.parseInt(subparts[1])),
-                                new InetSocketAddress(subparts[0], Integer.parseInt(subparts[2])),
-                                new InetSocketAddress(subparts[0], Integer.parseInt(clientPort))));
+                String subparts[] = parts[i].split(":");
+                peers.put(Long.valueOf(i), new QuorumServer(i, new InetSocketAddress(subparts[0], Integer.parseInt(subparts[1]))));
             }
             try {
                 if (LOG.isDebugEnabled()) {

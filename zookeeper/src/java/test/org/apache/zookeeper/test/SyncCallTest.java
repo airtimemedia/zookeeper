@@ -29,7 +29,6 @@ import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.AsyncCallback.Children2Callback;
 import org.apache.zookeeper.AsyncCallback.ChildrenCallback;
-import org.apache.zookeeper.AsyncCallback.Create2Callback;
 import org.apache.zookeeper.AsyncCallback.StringCallback;
 import org.apache.zookeeper.AsyncCallback.VoidCallback;
 import org.apache.zookeeper.ZooDefs.Ids;
@@ -38,8 +37,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 public class SyncCallTest extends ClientBase
-    implements ChildrenCallback, Children2Callback,
-               StringCallback, VoidCallback, Create2Callback
+    implements ChildrenCallback, Children2Callback, StringCallback, VoidCallback
 {
     private CountDownLatch opsCount;
     
@@ -52,16 +50,11 @@ public class SyncCallTest extends ClientBase
             LOG.info("Starting ZK:" + (new Date()).toString());
             opsCount = new CountDownLatch(limit);
             ZooKeeper zk = createClient();
-
+            
             LOG.info("Beginning test:" + (new Date()).toString());
-            for(int i = 0; i < 50; i++)
+            for(int i = 0; i < 100; i++)
                 zk.create("/test" + i, new byte[0], Ids.OPEN_ACL_UNSAFE,
-                          CreateMode.PERSISTENT, (StringCallback)this, results);
-
-            for(int i = 50; i < 100; i++) {
-              zk.create("/test" + i, new byte[0], Ids.OPEN_ACL_UNSAFE,
-                        CreateMode.PERSISTENT, (Create2Callback)this, results);
-            }
+                        CreateMode.PERSISTENT, this, results);
             zk.sync("/test", this, results);
             for(int i = 0; i < 100; i++)
                 zk.delete("/test" + i, 0, this, results);
@@ -111,12 +104,5 @@ public class SyncCallTest extends ClientBase
         ((List<Integer>) ctx).add(rc);    
         opsCount.countDown();
     
-    }
-
-    @Override
-    public void processResult(int rc, String path, Object ctx, String name,
-        Stat stat) {
-      ((List<Integer>) ctx).add(rc);
-      opsCount.countDown();
     }
 }

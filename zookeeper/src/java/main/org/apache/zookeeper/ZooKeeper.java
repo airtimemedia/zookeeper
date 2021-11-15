@@ -18,67 +18,23 @@
 
 package org.apache.zookeeper;
 
-import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.net.SocketAddress;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import org.apache.jute.Record;
-import org.apache.zookeeper.AsyncCallback.ACLCallback;
-import org.apache.zookeeper.AsyncCallback.Children2Callback;
-import org.apache.zookeeper.AsyncCallback.ChildrenCallback;
-import org.apache.zookeeper.AsyncCallback.Create2Callback;
-import org.apache.zookeeper.AsyncCallback.DataCallback;
-import org.apache.zookeeper.AsyncCallback.MultiCallback;
-import org.apache.zookeeper.AsyncCallback.StatCallback;
-import org.apache.zookeeper.AsyncCallback.StringCallback;
-import org.apache.zookeeper.AsyncCallback.VoidCallback;
-import org.apache.zookeeper.KeeperException.Code;
-import org.apache.zookeeper.KeeperException.NoWatcherException;
+import org.apache.zookeeper.AsyncCallback.*;
 import org.apache.zookeeper.OpResult.ErrorResult;
-import org.apache.zookeeper.Watcher.Event.EventType;
-import org.apache.zookeeper.Watcher.WatcherType;
 import org.apache.zookeeper.client.ConnectStringParser;
 import org.apache.zookeeper.client.HostProvider;
 import org.apache.zookeeper.client.StaticHostProvider;
 import org.apache.zookeeper.client.ZooKeeperSaslClient;
 import org.apache.zookeeper.common.PathUtils;
-import org.apache.zookeeper.common.StringUtils;
 import org.apache.zookeeper.data.ACL;
 import org.apache.zookeeper.data.Stat;
-import org.apache.zookeeper.proto.CheckWatchesRequest;
-import org.apache.zookeeper.proto.Create2Response;
-import org.apache.zookeeper.proto.CreateRequest;
-import org.apache.zookeeper.proto.CreateResponse;
-import org.apache.zookeeper.proto.DeleteRequest;
-import org.apache.zookeeper.proto.ExistsRequest;
-import org.apache.zookeeper.proto.GetACLRequest;
-import org.apache.zookeeper.proto.GetACLResponse;
-import org.apache.zookeeper.proto.GetChildren2Request;
-import org.apache.zookeeper.proto.GetChildren2Response;
-import org.apache.zookeeper.proto.GetChildrenRequest;
-import org.apache.zookeeper.proto.GetChildrenResponse;
-import org.apache.zookeeper.proto.GetDataRequest;
-import org.apache.zookeeper.proto.GetDataResponse;
-import org.apache.zookeeper.proto.ReconfigRequest;
-import org.apache.zookeeper.proto.RemoveWatchesRequest;
-import org.apache.zookeeper.proto.ReplyHeader;
-import org.apache.zookeeper.proto.RequestHeader;
-import org.apache.zookeeper.proto.SetACLRequest;
-import org.apache.zookeeper.proto.SetACLResponse;
-import org.apache.zookeeper.proto.SetDataRequest;
-import org.apache.zookeeper.proto.SetDataResponse;
-import org.apache.zookeeper.proto.SyncRequest;
-import org.apache.zookeeper.proto.SyncResponse;
+import org.apache.zookeeper.proto.*;
 import org.apache.zookeeper.server.DataTree;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.net.SocketAddress;
+import java.util.*;
 
 /**
  * This is the main class of ZooKeeper client library. To use a ZooKeeper
@@ -130,8 +86,6 @@ import org.slf4j.LoggerFactory;
 public class ZooKeeper {
 
     public static final String ZOOKEEPER_CLIENT_CNXN_SOCKET = "zookeeper.clientCnxnSocket";
-    // Setting this to "true" will enable encrypted client-server communication.
-    public static final String SECURE_CLIENT = "zookeeper.client.secure";
 
     protected final ClientCnxn cnxn;
     private static final Logger LOG;
@@ -141,66 +95,11 @@ public class ZooKeeper {
         Environment.logEnv("Client environment:", LOG);
     }
 
-    private final HostProvider hostProvider;
-
-    /**
-     * This function allows a client to update the connection string by providing 
-     * a new comma separated list of host:port pairs, each corresponding to a 
-     * ZooKeeper server. 
-     * <p>
-     * The function invokes a <a href="https://issues.apache.org/jira/browse/ZOOKEEPER-1355">
-     * probabilistic load-balancing algorithm</a> which may cause the client to disconnect from 
-     * its current host with the goal to achieve expected uniform number of connections per server 
-     * in the new list. In case the current host to which the client is connected is not in the new
-     * list this call will always cause the connection to be dropped. Otherwise, the decision
-     * is based on whether the number of servers has increased or decreased and by how much.
-     * For example, if the previous connection string contained 3 hosts and now the list contains
-     * these 3 hosts and 2 more hosts, 40% of clients connected to each of the 3 hosts will
-     * move to one of the new hosts in order to balance the load. The algorithm will disconnect 
-     * from the current host with probability 0.4 and in this case cause the client to connect 
-     * to one of the 2 new hosts, chosen at random.
-     * <p>
-     * If the connection is dropped, the client moves to a special mode "reconfigMode" where he chooses
-     * a new server to connect to using the probabilistic algorithm. After finding a server,
-     * or exhausting all servers in the new list after trying all of them and failing to connect,
-     * the client moves back to the normal mode of operation where it will pick an arbitrary server
-     * from the connectString and attempt to connect to it. If establishment of
-     * the connection fails, another server in the connect string will be tried
-     * (the order is non-deterministic, as we random shuffle the list), until a
-     * connection is established. The client will continue attempts until the
-     * session is explicitly closed (or the session is expired by the server).
-
-     * @param connectString
-     *            comma separated host:port pairs, each corresponding to a zk
-     *            server. e.g. "127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002"
-     *            If the optional chroot suffix is used the example would look
-     *            like: "127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002/app/a"
-     *            where the client would be rooted at "/app/a" and all paths
-     *            would be relative to this root - ie getting/setting/etc...
-     *            "/foo/bar" would result in operations being run on
-     *            "/app/a/foo/bar" (from the server perspective).     
-     *
-     * @throws IOException in cases of network failure     
-     */
-    public void updateServerList(String connectString) throws IOException {
-        ConnectStringParser connectStringParser = new ConnectStringParser(connectString);
-        Collection<InetSocketAddress> serverAddresses = connectStringParser.getServerAddresses();
-
-        ClientCnxnSocket clientCnxnSocket = cnxn.sendThread.getClientCnxnSocket();
-        InetSocketAddress currentHost = (InetSocketAddress) clientCnxnSocket.getRemoteSocketAddress();
-
-        boolean reconfigMode = hostProvider.updateServerList(serverAddresses, currentHost);
-
-        // cause disconnection - this will cause next to be called
-        // which will in turn call nextReconfigMode
-        if (reconfigMode) clientCnxnSocket.testableCloseSocket();
-    }
-
     public ZooKeeperSaslClient getSaslClient() {
         return cnxn.zooKeeperSaslClient;
     }
 
-    private final ZKWatchManager watchManager;
+    private final ZKWatchManager watchManager = new ZKWatchManager();
 
     List<String> getDataWatches() {
         synchronized(watchManager.dataWatches) {
@@ -228,7 +127,7 @@ public class ZooKeeper {
      * the public methods will not be exposed as part of the ZooKeeper client
      * API.
      */
-    static class ZKWatchManager implements ClientWatchManager {
+    private static class ZKWatchManager implements ClientWatchManager {
         private final Map<String, Set<Watcher>> dataWatches =
             new HashMap<String, Set<Watcher>>();
         private final Map<String, Set<Watcher>> existWatches =
@@ -244,178 +143,6 @@ public class ZooKeeper {
             }
         }
 
-        public Map<EventType, Set<Watcher>> removeWatcher(String clientPath,
-                Watcher watcher, WatcherType watcherType, boolean local, int rc)
-                throws KeeperException {
-            // Validate the provided znode path contains the given watcher of
-            // watcherType
-            containsWatcher(clientPath, watcher, watcherType);
-
-            Map<EventType, Set<Watcher>> removedWatchers = new HashMap<EventType, Set<Watcher>>();
-            HashSet<Watcher> childWatchersToRem = new HashSet<Watcher>();
-            removedWatchers
-                    .put(EventType.ChildWatchRemoved, childWatchersToRem);
-            HashSet<Watcher> dataWatchersToRem = new HashSet<Watcher>();
-            removedWatchers.put(EventType.DataWatchRemoved, dataWatchersToRem);
-            boolean removedWatcher = false;
-            switch (watcherType) {
-            case Children: {
-                synchronized (childWatches) {
-                    removedWatcher = removeWatches(childWatches, watcher,
-                            clientPath, local, rc, childWatchersToRem);
-                }
-                break;
-            }
-            case Data: {
-                synchronized (dataWatches) {
-                    removedWatcher = removeWatches(dataWatches, watcher,
-                            clientPath, local, rc, dataWatchersToRem);
-                }
-
-                synchronized (existWatches) {
-                    boolean removedDataWatcher = removeWatches(existWatches,
-                            watcher, clientPath, local, rc, dataWatchersToRem);
-                    removedWatcher |= removedDataWatcher;
-                }
-                break;
-            }
-            case Any: {
-                synchronized (childWatches) {
-                    removedWatcher = removeWatches(childWatches, watcher,
-                            clientPath, local, rc, childWatchersToRem);
-                }
-
-                synchronized (dataWatches) {
-                    boolean removedDataWatcher = removeWatches(dataWatches,
-                            watcher, clientPath, local, rc, dataWatchersToRem);
-                    removedWatcher |= removedDataWatcher;
-                }
-                synchronized (existWatches) {
-                    boolean removedDataWatcher = removeWatches(existWatches,
-                            watcher, clientPath, local, rc, dataWatchersToRem);
-                    removedWatcher |= removedDataWatcher;
-                }
-            }
-            }
-            // Watcher function doesn't exists for the specified params
-            if (!removedWatcher) {
-                throw new KeeperException.NoWatcherException(clientPath);
-            }
-            return removedWatchers;
-        }
-
-        private boolean contains(String path, Watcher watcherObj,
-                Map<String, Set<Watcher>> pathVsWatchers) {
-            boolean watcherExists = true;
-            if (pathVsWatchers == null || pathVsWatchers.size() == 0) {
-                watcherExists = false;
-            } else {
-                Set<Watcher> watchers = pathVsWatchers.get(path);
-                if (watchers == null) {
-                    watcherExists = false;
-                } else if (watcherObj == null) {
-                    watcherExists = watchers.size() > 0;
-                } else {
-                    watcherExists = watchers.contains(watcherObj);
-                }
-            }
-            return watcherExists;
-        }
-
-        /**
-         * Validate the provided znode path contains the given watcher and
-         * watcherType
-         * 
-         * @param path
-         *            - client path
-         * @param watcher
-         *            - watcher object reference
-         * @param watcherType
-         *            - type of the watcher
-         * @throws NoWatcherException
-        */
-        void containsWatcher(String path, Watcher watcher,
-                WatcherType watcherType) throws NoWatcherException{
-            boolean containsWatcher = false;
-            switch (watcherType) {
-            case Children: {
-                synchronized (childWatches) {
-                    containsWatcher = contains(path, watcher, childWatches);
-                }
-                break;
-            }
-            case Data: {
-                synchronized (dataWatches) {
-                    containsWatcher = contains(path, watcher, dataWatches);
-                }
-
-                synchronized (existWatches) {
-                    boolean contains_temp = contains(path, watcher,
-                            existWatches);
-                    containsWatcher |= contains_temp;
-                }
-                break;
-            }
-            case Any: {
-                synchronized (childWatches) {
-                    containsWatcher = contains(path, watcher, childWatches);
-                }
-
-                synchronized (dataWatches) {
-                    boolean contains_temp = contains(path, watcher, dataWatches);
-                    containsWatcher |= contains_temp;
-                }
-                synchronized (existWatches) {
-                    boolean contains_temp = contains(path, watcher,
-                            existWatches);
-                    containsWatcher |= contains_temp;
-                }
-            }
-            }
-            // Watcher function doesn't exists for the specified params
-            if (!containsWatcher) {
-                throw new KeeperException.NoWatcherException(path);
-            }
-        }
-
-        protected boolean removeWatches(Map<String, Set<Watcher>> pathVsWatcher,
-                Watcher watcher, String path, boolean local, int rc,
-                Set<Watcher> removedWatchers) throws KeeperException {
-            if (!local && rc != Code.OK.intValue()) {
-                throw KeeperException
-                        .create(KeeperException.Code.get(rc), path);
-            }
-            boolean success = false;
-            // When local flag is true, remove watchers for the given path
-            // irrespective of rc. Otherwise shouldn't remove watchers locally
-            // when sees failure from server.
-            if (rc == Code.OK.intValue() || (local && rc != Code.OK.intValue())) {
-                // Remove all the watchers for the given path
-                if (watcher == null) {
-                    Set<Watcher> pathWatchers = pathVsWatcher.remove(path);
-                    if (pathWatchers != null) {
-                        // found path watchers
-                        removedWatchers.addAll(pathWatchers);
-                        success = true;
-                    }
-                } else {
-                    Set<Watcher> watchers = pathVsWatcher.get(path);
-                    if (watchers != null) {
-                        if (watchers.remove(watcher)) {
-                            // found path watcher
-                            removedWatchers.add(watcher);
-                            // cleanup <path vs watchlist>
-                            if (watchers.size() <= 0) {
-                                pathVsWatcher.remove(path);
-                            }
-                            success = true;
-                        }
-                    }
-                }
-            }
-            return success;
-        }
-        
         /* (non-Javadoc)
          * @see org.apache.zookeeper.ClientWatchManager#materialize(Event.KeeperState, 
          *                                                        Event.EventType, java.lang.String)
@@ -675,10 +402,6 @@ public class ZooKeeper {
      * Added in 3.2.0: An optional "chroot" suffix may also be appended to the
      * connection string. This will run the client commands while interpreting
      * all paths relative to this root (similar to the unix chroot command).
-     * <p>
-     * For backward compatibility, there is another version
-     * {@link #ZooKeeper(String, int, Watcher, boolean)} which uses
-     * default {@link StaticHostProvider}
      *
      * @param connectString
      *            comma separated host:port pairs, each corresponding to a zk
@@ -702,8 +425,6 @@ public class ZooKeeper {
      *            connects to one in read-only mode, i.e. read requests are
      *            allowed while write requests are not. It continues seeking for
      *            majority in the background.
-     * @param aHostProvider
-     *            use this as HostProvider to enable custom behaviour.
      *
      * @throws IOException
      *             in cases of network failure
@@ -711,80 +432,22 @@ public class ZooKeeper {
      *             if an invalid chroot path is specified
      */
     public ZooKeeper(String connectString, int sessionTimeout, Watcher watcher,
-            boolean canBeReadOnly, HostProvider aHostProvider)
-            throws IOException {
+            boolean canBeReadOnly)
+        throws IOException
+    {
         LOG.info("Initiating client connection, connectString=" + connectString
                 + " sessionTimeout=" + sessionTimeout + " watcher=" + watcher);
 
-        watchManager = defaultWatchManager();
         watchManager.defaultWatcher = watcher;
 
         ConnectStringParser connectStringParser = new ConnectStringParser(
                 connectString);
-        hostProvider = aHostProvider;
-
+        HostProvider hostProvider = new StaticHostProvider(
+                connectStringParser.getServerAddresses());
         cnxn = new ClientCnxn(connectStringParser.getChrootPath(),
                 hostProvider, sessionTimeout, this, watchManager,
                 getClientCnxnSocket(), canBeReadOnly);
         cnxn.start();
-    }
-
-    /**
-     * To create a ZooKeeper client object, the application needs to pass a
-     * connection string containing a comma separated list of host:port pairs,
-     * each corresponding to a ZooKeeper server.
-     * <p>
-     * Session establishment is asynchronous. This constructor will initiate
-     * connection to the server and return immediately - potentially (usually)
-     * before the session is fully established. The watcher argument specifies
-     * the watcher that will be notified of any changes in state. This
-     * notification can come at any point before or after the constructor call
-     * has returned.
-     * <p>
-     * The instantiated ZooKeeper client object will pick an arbitrary server
-     * from the connectString and attempt to connect to it. If establishment of
-     * the connection fails, another server in the connect string will be tried
-     * (the order is non-deterministic, as we random shuffle the list), until a
-     * connection is established. The client will continue attempts until the
-     * session is explicitly closed.
-     * <p>
-     * Added in 3.2.0: An optional "chroot" suffix may also be appended to the
-     * connection string. This will run the client commands while interpreting
-     * all paths relative to this root (similar to the unix chroot command).
-     * <p>
-     *
-     * @param connectString
-     *            comma separated host:port pairs, each corresponding to a zk
-     *            server. e.g. "127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002" If
-     *            the optional chroot suffix is used the example would look
-     *            like: "127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002/app/a"
-     *            where the client would be rooted at "/app/a" and all paths
-     *            would be relative to this root - ie getting/setting/etc...
-     *            "/foo/bar" would result in operations being run on
-     *            "/app/a/foo/bar" (from the server perspective).
-     * @param sessionTimeout
-     *            session timeout in milliseconds
-     * @param watcher
-     *            a watcher object which will be notified of state changes, may
-     *            also be notified for node events
-     * @param canBeReadOnly
-     *            (added in 3.4) whether the created client is allowed to go to
-     *            read-only mode in case of partitioning. Read-only mode
-     *            basically means that if the client can't find any majority
-     *            servers but there's partitioned server it could reach, it
-     *            connects to one in read-only mode, i.e. read requests are
-     *            allowed while write requests are not. It continues seeking for
-     *            majority in the background.
-     *
-     * @throws IOException
-     *             in cases of network failure
-     * @throws IllegalArgumentException
-     *             if an invalid chroot path is specified
-     */
-    public ZooKeeper(String connectString, int sessionTimeout, Watcher watcher,
-            boolean canBeReadOnly) throws IOException {
-        this(connectString, sessionTimeout, watcher, canBeReadOnly,
-                createDefaultHostProvider(connectString));
     }
 
     /**
@@ -874,10 +537,6 @@ public class ZooKeeper {
      * sessionPasswd respectively if reconnecting. Otherwise, if not
      * reconnecting, use the other constructor which does not require these
      * parameters.
-     * <p>
-     * For backward compatibility, there is another version
-     * {@link #ZooKeeper(String, int, Watcher, long, byte[], boolean)} which uses
-     * default {@link StaticHostProvider}
      *
      * @param connectString
      *            comma separated host:port pairs, each corresponding to a zk
@@ -905,14 +564,14 @@ public class ZooKeeper {
      *            connects to one in read-only mode, i.e. read requests are
      *            allowed while write requests are not. It continues seeking for
      *            majority in the background.
-     * @param aHostProvider
-     *            use this as HostProvider to enable custom behaviour.
+     *
      * @throws IOException in cases of network failure
      * @throws IllegalArgumentException if an invalid chroot path is specified
      */
     public ZooKeeper(String connectString, int sessionTimeout, Watcher watcher,
-            long sessionId, byte[] sessionPasswd, boolean canBeReadOnly,
-            HostProvider aHostProvider) throws IOException {
+            long sessionId, byte[] sessionPasswd, boolean canBeReadOnly)
+        throws IOException
+    {
         LOG.info("Initiating client connection, connectString=" + connectString
                 + " sessionTimeout=" + sessionTimeout
                 + " watcher=" + watcher
@@ -920,102 +579,17 @@ public class ZooKeeper {
                 + " sessionPasswd="
                 + (sessionPasswd == null ? "<null>" : "<hidden>"));
 
-        watchManager = defaultWatchManager();
         watchManager.defaultWatcher = watcher;
-       
+
         ConnectStringParser connectStringParser = new ConnectStringParser(
                 connectString);
-        hostProvider = aHostProvider;
-
+        HostProvider hostProvider = new StaticHostProvider(
+                connectStringParser.getServerAddresses());
         cnxn = new ClientCnxn(connectStringParser.getChrootPath(),
                 hostProvider, sessionTimeout, this, watchManager,
                 getClientCnxnSocket(), sessionId, sessionPasswd, canBeReadOnly);
         cnxn.seenRwServerBefore = true; // since user has provided sessionId
         cnxn.start();
-    }
-
-    /**
-     * To create a ZooKeeper client object, the application needs to pass a
-     * connection string containing a comma separated list of host:port pairs,
-     * each corresponding to a ZooKeeper server.
-     * <p>
-     * Session establishment is asynchronous. This constructor will initiate
-     * connection to the server and return immediately - potentially (usually)
-     * before the session is fully established. The watcher argument specifies
-     * the watcher that will be notified of any changes in state. This
-     * notification can come at any point before or after the constructor call
-     * has returned.
-     * <p>
-     * The instantiated ZooKeeper client object will pick an arbitrary server
-     * from the connectString and attempt to connect to it. If establishment of
-     * the connection fails, another server in the connect string will be tried
-     * (the order is non-deterministic, as we random shuffle the list), until a
-     * connection is established. The client will continue attempts until the
-     * session is explicitly closed (or the session is expired by the server).
-     * <p>
-     * Added in 3.2.0: An optional "chroot" suffix may also be appended to the
-     * connection string. This will run the client commands while interpreting
-     * all paths relative to this root (similar to the unix chroot command).
-     * <p>
-     * Use {@link #getSessionId} and {@link #getSessionPasswd} on an established
-     * client connection, these values must be passed as sessionId and
-     * sessionPasswd respectively if reconnecting. Otherwise, if not
-     * reconnecting, use the other constructor which does not require these
-     * parameters.
-     * <p>
-     * This constructor uses a StaticHostProvider; there is another one  
-     * to enable custom behaviour.
-     *
-     * @param connectString
-     *            comma separated host:port pairs, each corresponding to a zk
-     *            server. e.g. "127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002"
-     *            If the optional chroot suffix is used the example would look
-     *            like: "127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002/app/a"
-     *            where the client would be rooted at "/app/a" and all paths
-     *            would be relative to this root - ie getting/setting/etc...
-     *            "/foo/bar" would result in operations being run on
-     *            "/app/a/foo/bar" (from the server perspective).
-     * @param sessionTimeout
-     *            session timeout in milliseconds
-     * @param watcher
-     *            a watcher object which will be notified of state changes, may
-     *            also be notified for node events
-     * @param sessionId
-     *            specific session id to use if reconnecting
-     * @param sessionPasswd
-     *            password for this session
-     * @param canBeReadOnly
-     *            (added in 3.4) whether the created client is allowed to go to
-     *            read-only mode in case of partitioning. Read-only mode
-     *            basically means that if the client can't find any majority
-     *            servers but there's partitioned server it could reach, it
-     *            connects to one in read-only mode, i.e. read requests are
-     *            allowed while write requests are not. It continues seeking for
-     *            majority in the background.
-     * @throws IOException in cases of network failure
-     * @throws IllegalArgumentException if an invalid chroot path is specified
-     */
-    public ZooKeeper(String connectString, int sessionTimeout, Watcher watcher,
-            long sessionId, byte[] sessionPasswd, boolean canBeReadOnly)
-            throws IOException {
-        this(connectString, sessionTimeout, watcher, sessionId, sessionPasswd,
-                canBeReadOnly, createDefaultHostProvider(connectString));
-    }
-
-    // default hostprovider
-    private static HostProvider createDefaultHostProvider(String connectString) {
-        return new StaticHostProvider(
-                new ConnectStringParser(connectString).getServerAddresses());
-    }
-
-    // VisibleForTesting
-    public Testable getTestable() {
-        return new ZooKeeperTestable(this, cnxn);
-    }
-
-    /* Useful for testing watch handling behavior */
-    protected ZKWatchManager defaultWatchManager() {
-        return new ZKWatchManager();
     }
 
     /**
@@ -1194,7 +768,7 @@ public class ZooKeeper {
         final String serverPath = prependChroot(clientPath);
 
         RequestHeader h = new RequestHeader();
-        h.setType(createMode.isContainer() ? ZooDefs.OpCode.createContainer : ZooDefs.OpCode.create);
+        h.setType(ZooDefs.OpCode.create);
         CreateRequest request = new CreateRequest();
         CreateResponse response = new CreateResponse();
         request.setData(data);
@@ -1208,97 +782,6 @@ public class ZooKeeper {
         if (r.getErr() != 0) {
             throw KeeperException.create(KeeperException.Code.get(r.getErr()),
                     clientPath);
-        }
-        if (cnxn.chrootPath == null) {
-            return response.getPath();
-        } else {
-            return response.getPath().substring(cnxn.chrootPath.length());
-        }
-    }
-
-    /**
-     * Create a node with the given path and returns the Stat of that node. The
-     * node data will be the given data and node acl will be the given acl.
-     * <p>
-     * The flags argument specifies whether the created node will be ephemeral
-     * or not.
-     * <p>
-     * An ephemeral node will be removed by the ZooKeeper automatically when the
-     * session associated with the creation of the node expires.
-     * <p>
-     * The flags argument can also specify to create a sequential node. The
-     * actual path name of a sequential node will be the given path plus a
-     * suffix "i" where i is the current sequential number of the node. The sequence
-     * number is always fixed length of 10 digits, 0 padded. Once
-     * such a node is created, the sequential number will be incremented by one.
-     * <p>
-     * If a node with the same actual path already exists in the ZooKeeper, a
-     * KeeperException with error code KeeperException.NodeExists will be
-     * thrown. Note that since a different actual path is used for each
-     * invocation of creating sequential node with the same path argument, the
-     * call will never throw "file exists" KeeperException.
-     * <p>
-     * If the parent node does not exist in the ZooKeeper, a KeeperException
-     * with error code KeeperException.NoNode will be thrown.
-     * <p>
-     * An ephemeral node cannot have children. If the parent node of the given
-     * path is ephemeral, a KeeperException with error code
-     * KeeperException.NoChildrenForEphemerals will be thrown.
-     * <p>
-     * This operation, if successful, will trigger all the watches left on the
-     * node of the given path by exists and getData API calls, and the watches
-     * left on the parent node by getChildren API calls.
-     * <p>
-     * If a node is created successfully, the ZooKeeper server will trigger the
-     * watches on the path left by exists calls, and the watches on the parent
-     * of the node by getChildren calls.
-     * <p>
-     * The maximum allowable size of the data array is 1 MB (1,048,576 bytes).
-     * Arrays larger than this will cause a KeeperExecption to be thrown.
-     *
-     * @param path
-     *                the path for the node
-     * @param data
-     *                the initial data for the node
-     * @param acl
-     *                the acl for the node
-     * @param createMode
-     *                specifying whether the node to be created is ephemeral
-     *                and/or sequential
-     * @param stat
-     *                The output Stat object.
-     * @return the actual path of the created node
-     * @throws KeeperException if the server returns a non-zero error code
-     * @throws KeeperException.InvalidACLException if the ACL is invalid, null, or empty
-     * @throws InterruptedException if the transaction is interrupted
-     * @throws IllegalArgumentException if an invalid path is specified
-     */
-    public String create(final String path, byte data[], List<ACL> acl,
-            CreateMode createMode, Stat stat)
-            throws KeeperException, InterruptedException {
-        final String clientPath = path;
-        PathUtils.validatePath(clientPath, createMode.isSequential());
-
-        final String serverPath = prependChroot(clientPath);
-
-        RequestHeader h = new RequestHeader();
-        h.setType(createMode.isContainer() ? ZooDefs.OpCode.createContainer : ZooDefs.OpCode.create2);
-        CreateRequest request = new CreateRequest();
-        Create2Response response = new Create2Response();
-        request.setData(data);
-        request.setFlags(createMode.toFlag());
-        request.setPath(serverPath);
-        if (acl != null && acl.size() == 0) {
-            throw new KeeperException.InvalidACLException();
-        }
-        request.setAcl(acl);
-        ReplyHeader r = cnxn.submitRequest(h, request, response, null);
-        if (r.getErr() != 0) {
-            throw KeeperException.create(KeeperException.Code.get(r.getErr()),
-                    clientPath);
-        }
-        if (stat != null) {
-            DataTree.copyStat(response.getStat(), stat);
         }
         if (cnxn.chrootPath == null) {
             return response.getPath();
@@ -1312,8 +795,9 @@ public class ZooKeeper {
      *
      * @see #create(String, byte[], List, CreateMode)
      */
+
     public void create(final String path, byte data[], List<ACL> acl,
-            CreateMode createMode, StringCallback cb, Object ctx)
+            CreateMode createMode,  StringCallback cb, Object ctx)
     {
         final String clientPath = path;
         PathUtils.validatePath(clientPath, createMode.isSequential());
@@ -1321,35 +805,9 @@ public class ZooKeeper {
         final String serverPath = prependChroot(clientPath);
 
         RequestHeader h = new RequestHeader();
-        h.setType(createMode.isContainer() ? ZooDefs.OpCode.createContainer : ZooDefs.OpCode.create);
+        h.setType(ZooDefs.OpCode.create);
         CreateRequest request = new CreateRequest();
         CreateResponse response = new CreateResponse();
-        ReplyHeader r = new ReplyHeader();
-        request.setData(data);
-        request.setFlags(createMode.toFlag());
-        request.setPath(serverPath);
-        request.setAcl(acl);
-        cnxn.queuePacket(h, r, request, response, cb, clientPath,
-                serverPath, ctx, null);
-    }
-
-    /**
-     * The asynchronous version of create.
-     *
-     * @see #create(String, byte[], List, CreateMode, Stat)
-     */
-    public void create(final String path, byte data[], List<ACL> acl,
-            CreateMode createMode, Create2Callback cb, Object ctx)
-    {
-        final String clientPath = path;
-        PathUtils.validatePath(clientPath, createMode.isSequential());
-
-        final String serverPath = prependChroot(clientPath);
-
-        RequestHeader h = new RequestHeader();
-        h.setType(createMode.isContainer() ? ZooDefs.OpCode.createContainer : ZooDefs.OpCode.create2);
-        CreateRequest request = new CreateRequest();
-        Create2Response response = new Create2Response();
         ReplyHeader r = new ReplyHeader();
         request.setData(data);
         request.setFlags(createMode.toFlag());
@@ -1449,61 +907,12 @@ public class ZooKeeper {
         for (Op op : ops) {
             op.validate();
         }
-        return multiInternal(generateMultiTransaction(ops));
-    }
-
-    /**
-     * The asynchronous version of multi.
-     *
-     * @see #multi(Iterable)
-     */
-    public void multi(Iterable<Op> ops, MultiCallback cb, Object ctx) {
-        List<OpResult> results = validatePath(ops);
-        if (results.size() > 0) {
-            cb.processResult(KeeperException.Code.BADARGUMENTS.intValue(),
-                    null, ctx, results);
-            return;
-        }
-        multiInternal(generateMultiTransaction(ops), cb, ctx);
-    }
-
-    private List<OpResult> validatePath(Iterable<Op> ops) {
-        List<OpResult> results = new ArrayList<OpResult>();
-        boolean error = false;
-        for (Op op : ops) {
-            try {
-                op.validate();
-            } catch (IllegalArgumentException iae) {
-                LOG.error("IllegalArgumentException: " + iae.getMessage());
-                ErrorResult err = new ErrorResult(
-                        KeeperException.Code.BADARGUMENTS.intValue());
-                results.add(err);
-                error = true;
-                continue;
-            } catch (KeeperException ke) {
-                LOG.error("KeeperException: " + ke.getMessage());
-                ErrorResult err = new ErrorResult(ke.code().intValue());
-                results.add(err);
-                error = true;
-                continue;
-            }
-            ErrorResult err = new ErrorResult(
-                    KeeperException.Code.RUNTIMEINCONSISTENCY.intValue());
-            results.add(err);
-        }
-        if (false == error) {
-            results.clear();
-        }
-        return results;
-    }
-
-    private MultiTransactionRecord generateMultiTransaction(Iterable<Op> ops) {
         // reconstructing transaction with the chroot prefix
         List<Op> transaction = new ArrayList<Op>();
         for (Op op : ops) {
             transaction.add(withRootPrefix(op));
         }
-        return new MultiTransactionRecord(transaction);
+        return multiInternal(new MultiTransactionRecord(transaction));
     }
 
     private Op withRootPrefix(Op op) {
@@ -1514,13 +923,6 @@ public class ZooKeeper {
             }
         }
         return op;
-    }
-
-    protected void multiInternal(MultiTransactionRecord request, MultiCallback cb, Object ctx) {
-        RequestHeader h = new RequestHeader();
-        h.setType(ZooDefs.OpCode.multi);
-        MultiResponse response = new MultiResponse();
-        cnxn.queuePacket(h, new ReplyHeader(), request, response, cb, null, null, ctx, null);
     }
 
     protected List<OpResult> multiInternal(MultiTransactionRecord request)
@@ -1821,188 +1223,6 @@ public class ZooKeeper {
     }
 
     /**
-     * Return the last committed configuration (as known to the server to which the client is connected)
-     * and the stat of the configuration.
-     * <p>
-     * If the watch is non-null and the call is successful (no exception is
-     * thrown), a watch will be left on the configuration node (ZooDefs.CONFIG_NODE). The watch
-     * will be triggered by a successful reconfig operation
-     * <p>
-     * A KeeperException with error code KeeperException.NoNode will be thrown
-     * if the configuration node doesn't exists.
-     *
-     * @param watcher explicit watcher
-     * @param stat the stat of the configuration node ZooDefs.CONFIG_NODE
-     * @return configuration data stored in ZooDefs.CONFIG_NODE
-     * @throws KeeperException If the server signals an error with a non-zero error code
-     * @throws InterruptedException If the server transaction is interrupted.
-     */
-    public byte[] getConfig(Watcher watcher, Stat stat)
-        throws KeeperException, InterruptedException
-     {
-        final String configZnode = ZooDefs.CONFIG_NODE;
- 
-        // the watch contains the un-chroot path
-        WatchRegistration wcb = null;
-        if (watcher != null) {
-            wcb = new DataWatchRegistration(watcher, configZnode);
-        }
-
-        RequestHeader h = new RequestHeader();
-        h.setType(ZooDefs.OpCode.getData);
-        GetDataRequest request = new GetDataRequest();
-        request.setPath(configZnode);
-        request.setWatch(watcher != null);
-        GetDataResponse response = new GetDataResponse();
-        ReplyHeader r = cnxn.submitRequest(h, request, response, wcb);
-        if (r.getErr() != 0) {
-            throw KeeperException.create(KeeperException.Code.get(r.getErr()),
-                   configZnode);
-        }
-        if (stat != null) {
-            DataTree.copyStat(response.getStat(), stat);
-        }
-        return response.getData();
-    }
-
-    /**
-     * The asynchronous version of getConfig.
-     *
-     * @see #getConfig(Watcher, Stat)
-     */
-    public void getConfig(Watcher watcher,
-            DataCallback cb, Object ctx)
-    {
-        final String configZnode = ZooDefs.CONFIG_NODE;
-        
-        // the watch contains the un-chroot path
-        WatchRegistration wcb = null;
-        if (watcher != null) {
-            wcb = new DataWatchRegistration(watcher, configZnode);
-        }
-
-        RequestHeader h = new RequestHeader();
-        h.setType(ZooDefs.OpCode.getData);
-        GetDataRequest request = new GetDataRequest();
-        request.setPath(configZnode);
-        request.setWatch(watcher != null);
-        GetDataResponse response = new GetDataResponse();
-        cnxn.queuePacket(h, new ReplyHeader(), request, response, cb,
-               configZnode, configZnode, ctx, wcb);
-    }
-
-    
-    /**
-     * Return the last committed configuration (as known to the server to which the client is connected)
-     * and the stat of the configuration.
-     * <p>
-     * If the watch is true and the call is successful (no exception is
-     * thrown), a watch will be left on the configuration node (ZooDefs.CONFIG_NODE). The watch
-     * will be triggered by a successful reconfig operation
-     * <p>
-     * A KeeperException with error code KeeperException.NoNode will be thrown
-     * if no node with the given path exists.
-     *
-     * @param watch whether need to watch this node
-     * @param stat the stat of the configuration node ZooDefs.CONFIG_NODE
-     * @return configuration data stored in ZooDefs.CONFIG_NODE
-     * @throws KeeperException If the server signals an error with a non-zero error code
-     * @throws InterruptedException If the server transaction is interrupted.
-     */
-    public byte[] getConfig(boolean watch, Stat stat)
-            throws KeeperException, InterruptedException {
-        return getConfig(watch ? watchManager.defaultWatcher : null, stat);
-    }
- 
-    /**
-     * The Asynchronous version of getConfig. 
-     * 
-     * @see #getData(String, boolean, Stat)
-     */
-    public void getConfig(boolean watch, DataCallback cb, Object ctx) {
-        getConfig(watch ? watchManager.defaultWatcher : null, cb, ctx);
-    }
-    
-    /**
-     * Reconfigure - add/remove servers. Return the new configuration.
-     * @param joiningServers
-     *                a comma separated list of servers being added (incremental reconfiguration)
-     * @param leavingServers
-     *                a comma separated list of servers being removed (incremental reconfiguration)
-     * @param newMembers
-     *                a comma separated list of new membership (non-incremental reconfiguration)
-     * @param fromConfig
-     *                version of the current configuration (optional - causes reconfiguration to throw an exception if configuration is no longer current)
-     * @param stat the stat of /zookeeper/config znode will be copied to this
-     *             parameter if not null.
-     * @return new configuration
-     * @throws InterruptedException If the server transaction is interrupted.
-     * @throws KeeperException If the server signals an error with a non-zero error code.     
-     */
-    public byte[] reconfig(String joiningServers, String leavingServers, String newMembers, long fromConfig, Stat stat) throws KeeperException, InterruptedException
-    {
-        RequestHeader h = new RequestHeader();
-        h.setType(ZooDefs.OpCode.reconfig);       
-        ReconfigRequest request = new ReconfigRequest(joiningServers, leavingServers, newMembers, fromConfig);        
-        GetDataResponse response = new GetDataResponse();       
-        ReplyHeader r = cnxn.submitRequest(h, request, response, null);
-        if (r.getErr() != 0) {
-            throw KeeperException.create(KeeperException.Code.get(r.getErr()), "");
-        }
-        if (stat != null) {
-            DataTree.copyStat(response.getStat(), stat);
-        }
-        return response.getData();
-    }
-
-    /**
-     * Convenience wrapper around reconfig that takes Lists of strings instead of comma-separated servers.
-     *
-     * @see #reconfig
-     *
-     */
-    public byte[] reconfig(List<String> joiningServers, List<String> leavingServers, List<String> newMembers, long fromConfig, Stat stat) throws KeeperException, InterruptedException
-    {
-        return reconfig(StringUtils.joinStrings(joiningServers, ","), 
-        		StringUtils.joinStrings(leavingServers, ","), 
-        		StringUtils.joinStrings(newMembers, ","), 
-        		fromConfig, stat);
-    }
-
-    /**
-     * The Asynchronous version of reconfig. 
-     *
-     * @see #reconfig
-     *      
-     **/
-    public void reconfig(String joiningServers, String leavingServers,
-        String newMembers, long fromConfig, DataCallback cb, Object ctx)
-    {
-        RequestHeader h = new RequestHeader();
-        h.setType(ZooDefs.OpCode.reconfig);       
-        ReconfigRequest request = new ReconfigRequest(joiningServers, leavingServers, newMembers, fromConfig);
-        GetDataResponse response = new GetDataResponse();
-        cnxn.queuePacket(h, new ReplyHeader(), request, response, cb,
-               ZooDefs.CONFIG_NODE, ZooDefs.CONFIG_NODE, ctx, null);
-    }
- 
-    /**
-     * Convenience wrapper around asynchronous reconfig that takes Lists of strings instead of comma-separated servers.
-     *
-     * @see #reconfig
-     *
-     */
-    public void reconfig(List<String> joiningServers,
-        List<String> leavingServers, List<String> newMembers, long fromConfig,
-        DataCallback cb, Object ctx)
-    {
-        reconfig(StringUtils.joinStrings(joiningServers, ","), 
-        		StringUtils.joinStrings(leavingServers, ","), 
-        		StringUtils.joinStrings(newMembers, ","), 
-        		fromConfig, cb, ctx);
-    }
-   
-    /**
      * Set the data for the node of the given path if such a node exists and the
      * given version matches the version of the node (if the given version is
      * -1, it matches any node's versions). Return the stat of the node.
@@ -2086,8 +1306,7 @@ public class ZooKeeper {
      * @param path
      *                the given path for the node
      * @param stat
-     *                the stat of the node will be copied to this parameter if
-     *                not null.
+     *                the stat of the node will be copied to this parameter.
      * @return the ACL array of the given node.
      * @throws InterruptedException If the server transaction is interrupted.
      * @throws KeeperException If the server signals an error with a non-zero error code.
@@ -2111,9 +1330,7 @@ public class ZooKeeper {
             throw KeeperException.create(KeeperException.Code.get(r.getErr()),
                     clientPath);
         }
-        if (stat != null) {
-            DataTree.copyStat(response.getStat(), stat);
-        }
+        DataTree.copyStat(response.getStat(), stat);
         return response.getAcl();
     }
 
@@ -2473,173 +1690,6 @@ public class ZooKeeper {
         request.setPath(serverPath);
         cnxn.queuePacket(h, new ReplyHeader(), request, response, cb,
                 clientPath, serverPath, ctx, null);
-    }
-
-    /**
-     * For the given znode path, removes the specified watcher of given
-     * watcherType.
-     *
-     * <p>
-     * Watcher shouldn't be null. A successful call guarantees that, the
-     * removed watcher won't be triggered.
-     * </p>
-     *
-     * @param path
-     *            - the path of the node
-     * @param watcher
-     *            - a concrete watcher
-     * @param watcherType
-     *            - the type of watcher to be removed
-     * @param local
-     *            - whether the watcher can be removed locally when there is no
-     *            server connection
-     * @throws InterruptedException
-     *             if the server transaction is interrupted.
-     * @throws KeeperException.NoWatcherException
-     *             if no watcher exists that match the specified parameters
-     * @throws KeeperException
-     *             if the server signals an error with a non-zero error code.
-     * @throws IllegalArgumentException
-     *             if any of the following is true:
-     *             <ul>
-     *             <li> {@code path} is invalid
-     *             <li> {@code watcher} is null
-     *             </ul>
-     *
-     * @since 3.5.0
-     */
-    public void removeWatches(String path, Watcher watcher,
-            WatcherType watcherType, boolean local)
-            throws InterruptedException, KeeperException {
-        validateWatcher(watcher);
-        removeWatches(ZooDefs.OpCode.checkWatches, path, watcher,
-                watcherType, local);
-    }
-
-    /**
-     * The asynchronous version of removeWatches.
-     *
-     * @see #removeWatches
-     */
-    public void removeWatches(String path, Watcher watcher,
-            WatcherType watcherType, boolean local, VoidCallback cb, Object ctx) {
-        validateWatcher(watcher);
-        removeWatches(ZooDefs.OpCode.checkWatches, path, watcher,
-                watcherType, local, cb, ctx);
-    }
-
-    /**
-     * For the given znode path, removes all the registered watchers of given
-     * watcherType.
-     *
-     * <p>
-     * A successful call guarantees that, the removed watchers won't be
-     * triggered.
-     * </p>
-     *
-     * @param path
-     *            - the path of the node
-     * @param watcherType
-     *            - the type of watcher to be removed
-     * @param local
-     *            - whether watches can be removed locally when there is no
-     *            server connection
-     * @throws InterruptedException
-     *             if the server transaction is interrupted.
-     * @throws KeeperException.NoWatcherException
-     *             if no watcher exists that match the specified parameters
-     * @throws KeeperException
-     *             if the server signals an error with a non-zero error code.
-     * @throws IllegalArgumentException
-     *             if an invalid {@code path} is specified
-     *
-     * @since 3.5.0
-     */
-    public void removeAllWatches(String path, WatcherType watcherType,
-            boolean local) throws InterruptedException, KeeperException {
-
-        removeWatches(ZooDefs.OpCode.removeWatches, path, null, watcherType,
-                local);
-    }
-
-    /**
-     * The asynchronous version of removeAllWatches.
-     *
-     * @see #removeAllWatches
-     */
-    public void removeAllWatches(String path, WatcherType watcherType,
-            boolean local, VoidCallback cb, Object ctx) {
-
-        removeWatches(ZooDefs.OpCode.removeWatches, path, null,
-                watcherType, local, cb, ctx);
-    }
-
-    private void validateWatcher(Watcher watcher) {
-        if (watcher == null) {
-            throw new IllegalArgumentException(
-                    "Invalid Watcher, shouldn't be null!");
-        }
-    }
-
-    private void removeWatches(int opCode, String path, Watcher watcher,
-            WatcherType watcherType, boolean local)
-            throws InterruptedException, KeeperException {
-        PathUtils.validatePath(path);
-        final String clientPath = path;
-        final String serverPath = prependChroot(clientPath);
-        WatchDeregistration wcb = new WatchDeregistration(clientPath, watcher,
-                watcherType, local, watchManager);
-
-        RequestHeader h = new RequestHeader();
-        h.setType(opCode);
-        Record request = getRemoveWatchesRequest(opCode, watcherType,
-                serverPath);
-
-        ReplyHeader r = cnxn.submitRequest(h, request, null, null, wcb);
-        if (r.getErr() != 0) {
-            throw KeeperException.create(KeeperException.Code.get(r.getErr()),
-                    clientPath);
-        }
-    }
-
-    private void removeWatches(int opCode, String path, Watcher watcher,
-            WatcherType watcherType, boolean local, VoidCallback cb, Object ctx) {
-        PathUtils.validatePath(path);
-        final String clientPath = path;
-        final String serverPath = prependChroot(clientPath);
-        WatchDeregistration wcb = new WatchDeregistration(clientPath, watcher,
-                watcherType, local, watchManager);
-
-        RequestHeader h = new RequestHeader();
-        h.setType(opCode);
-        Record request = getRemoveWatchesRequest(opCode, watcherType,
-                serverPath);
-
-        cnxn.queuePacket(h, new ReplyHeader(), request, null, cb, clientPath,
-                serverPath, ctx, null, wcb);
-    }
-
-    private Record getRemoveWatchesRequest(int opCode, WatcherType watcherType,
-            final String serverPath) {
-        Record request = null;
-        switch (opCode) {
-        case ZooDefs.OpCode.checkWatches:
-            CheckWatchesRequest chkReq = new CheckWatchesRequest();
-            chkReq.setPath(serverPath);
-            chkReq.setType(watcherType.getIntValue());
-            request = chkReq;
-            break;
-        case ZooDefs.OpCode.removeWatches:
-            RemoveWatchesRequest rmReq = new RemoveWatchesRequest();
-            rmReq.setPath(serverPath);
-            rmReq.setType(watcherType.getIntValue());
-            request = rmReq;
-            break;
-        default:
-            LOG.warn("unknown type " + opCode);
-            break;
-        }
-        return request;
     }
 
     public States getState() {

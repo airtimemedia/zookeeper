@@ -25,21 +25,18 @@ import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.util.HashMap;
 
+import junit.framework.TestCase;
 
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.server.quorum.QuorumPeer;
 import org.apache.zookeeper.server.quorum.QuorumPeer.QuorumServer;
-import org.junit.After;
-import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.runner.JUnitCore;
 
 @Ignore("No tests in this class.")
-public class BaseSysTest {
-    private static final File testData = new File(
-            System.getProperty("test.data.dir", "build/test/data"));
+public class BaseSysTest extends TestCase {
     private static int fakeBasePort = 33222;
     private static String zkHostPort;
     protected String prefix = "/sysTest";
@@ -52,15 +49,16 @@ public class BaseSysTest {
         }
     }
     InstanceManager im;
-    @Before
-    public void setUp() throws Exception {
+    @Override
+    protected void setUp() throws Exception {
         if (!fakeMachines) {
+            String localHost = InetAddress.getLocalHost().getCanonicalHostName();
             zk = new ZooKeeper(zkHostPort, 15000, new Watcher() {public void process(WatchedEvent e){}});
             im = new InstanceManager(zk, prefix);
         }
     }
-    @After
-    public void tearDown() throws Exception {
+    @Override
+    protected void tearDown() throws Exception {
         im.close();
     }
 
@@ -127,9 +125,8 @@ public class BaseSysTest {
                     sbClient.append(',');
                     sbServer.append(',');
                 }
-                sbClient.append(r[0]); // r[0] == "host:clientPort"
-                sbServer.append(r[1]); // r[1] == "host:leaderPort:leaderElectionPort"
-                sbServer.append(";"+(r[0].split(":"))[1]); // Appending ";clientPort"
+                sbClient.append(r[0]);
+                sbServer.append(r[1]);
             }
             serverHostPort = sbClient.toString();
             quorumHostPort = sbServer.toString();
@@ -152,7 +149,7 @@ public class BaseSysTest {
         }
         StringBuilder sb = new StringBuilder();
         for(int i = 0; i < count; i++) {
-            qpsDirs[i] = File.createTempFile("sysTest", ".tmp", testData);
+            qpsDirs[i] = File.createTempFile("sysTest", ".tmp");
             qpsDirs[i].delete();
             qpsDirs[i].mkdir();
             int port = fakeBasePort+10+i;

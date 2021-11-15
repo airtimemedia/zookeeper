@@ -23,6 +23,8 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.HashMap;
 
+import junit.framework.Assert;
+
 import org.apache.jute.Record;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
@@ -45,7 +47,6 @@ import org.apache.zookeeper.server.quorum.QuorumPeer.QuorumServer;
 import org.apache.zookeeper.txn.SetDataTxn;
 import org.apache.zookeeper.txn.TxnHeader;
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -54,6 +55,7 @@ import org.slf4j.LoggerFactory;
 public class TruncateTest extends ZKTestCase {
 	private static final Logger LOG = LoggerFactory.getLogger(TruncateTest.class);
     File dataDir1, dataDir2, dataDir3;
+    final int baseHostPort = PortAssignment.unique();
     
     @Before
     public void setUp() throws IOException {
@@ -112,40 +114,13 @@ public class TruncateTest extends ZKTestCase {
         iter.close();
         ClientBase.recursiveDelete(tmpdir);
     }
-    
-    @Test
-    public void testTruncationNullLog() throws Exception {
-        File tmpdir = ClientBase.createTmpDir();
-        FileTxnSnapLog snaplog = new FileTxnSnapLog(tmpdir, tmpdir);
-        ZKDatabase zkdb = new ZKDatabase(snaplog);
-
-        for (int i = 1; i <= 100; i++) {
-            append(zkdb, i);
-        }
-        zkdb.close();
-        File[] logs = snaplog.getDataDir().listFiles();
-        for(int i = 0; i < logs.length; i++) {
-            LOG.debug("Deleting: {}", logs[i].getName());
-            Assert.assertTrue("Failed to delete log file: " + logs[i].getName(), logs[i].delete());
-        }
-        try {
-            zkdb.truncateLog(1);
-            Assert.assertTrue("Should not get here", false);
-        }
-        catch(IOException e) {
-            Assert.assertTrue("Should have received an IOException", true);
-        }
-        catch(NullPointerException npe) {
-            Assert.fail("This should not throw NPE!");
-        }
- 
-        ClientBase.recursiveDelete(tmpdir);
-    }
 
     private void append(ZKDatabase zkdb, int i) throws IOException {
         TxnHeader hdr = new TxnHeader(1, 1, i, 1, ZooDefs.OpCode.setData);
         Record txn = new SetDataTxn("/foo" + i, new byte[0], 1);
-        Request req = new Request(0, 0, 0, hdr, txn, 0);
+        Request req = new Request(null, 0, 0, 0, null, null);
+        req.hdr = hdr;
+        req.txn = txn;
 
         zkdb.append(req);
         zkdb.commit();
@@ -154,7 +129,7 @@ public class TruncateTest extends ZKTestCase {
     @Test
     public void testTruncate() throws IOException, InterruptedException, KeeperException {
         // Prime the server that is going to come in late with 50 txns
-        String hostPort = "127.0.0.1:" + PortAssignment.unique();
+        String hostPort = "127.0.0.1:" + baseHostPort;
         int maxCnxns = 100;
         ServerCnxnFactory factory = ClientBase.createNewServerInstance(null,
                 hostPort, maxCnxns);
@@ -190,25 +165,15 @@ public class TruncateTest extends ZKTestCase {
         int tickTime = 2000;
         int initLimit = 3;
         int syncLimit = 3;
-
-        int port1 = PortAssignment.unique();
-        int port2 = PortAssignment.unique();
-        int port3 = PortAssignment.unique();
+        int port1 = baseHostPort+1;
+        int port2 = baseHostPort+2;
+        int port3 = baseHostPort+3;
         
         // Start up two of the quorum and add 10 txns
         HashMap<Long,QuorumServer> peers = new HashMap<Long,QuorumServer>();
-        peers.put(Long.valueOf(1), new QuorumServer(1,
-                       new InetSocketAddress("127.0.0.1", PortAssignment.unique()),
-                       new InetSocketAddress("127.0.0.1", PortAssignment.unique()),
-                       new InetSocketAddress("127.0.0.1", PortAssignment.unique())));
-        peers.put(Long.valueOf(2), new QuorumServer(2,
-                       new InetSocketAddress("127.0.0.1", PortAssignment.unique()),
-                       new InetSocketAddress("127.0.0.1", PortAssignment.unique()),
-                       new InetSocketAddress("127.0.0.1", PortAssignment.unique())));
-        peers.put(Long.valueOf(3), new QuorumServer(3,
-                       new InetSocketAddress("127.0.0.1", PortAssignment.unique()),
-                       new InetSocketAddress("127.0.0.1", PortAssignment.unique()),
-                       new InetSocketAddress("127.0.0.1", PortAssignment.unique())));
+        peers.put(Long.valueOf(1), new QuorumServer(1, new InetSocketAddress("127.0.0.1", port1 + 1000)));
+        peers.put(Long.valueOf(2), new QuorumServer(2, new InetSocketAddress("127.0.0.1", port2 + 1000)));
+        peers.put(Long.valueOf(3), new QuorumServer(3, new InetSocketAddress("127.0.0.1", port3 + 1000)));
 
         QuorumPeer s2 = new QuorumPeer(peers, dataDir2, dataDir2, port2, 0, 2, tickTime, initLimit, syncLimit);
         s2.start();

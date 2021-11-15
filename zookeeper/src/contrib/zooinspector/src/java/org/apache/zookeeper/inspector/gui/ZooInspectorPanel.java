@@ -43,12 +43,16 @@ import org.apache.zookeeper.inspector.manager.ZooInspectorManager;
  */
 public class ZooInspectorPanel extends JPanel implements
         NodeViewersChangeListener {
-    private final IconResource iconResource;
-    private final Toolbar toolbar;
+    private final JButton refreshButton;
+    private final JButton disconnectButton;
+    private final JButton connectButton;
     private final ZooInspectorNodeViewersPanel nodeViewersPanel;
     private final ZooInspectorTreeViewer treeViewer;
     private final ZooInspectorManager zooInspectorManager;
-
+    private final JButton addNodeButton;
+    private final JButton deleteNodeButton;
+    private final JButton nodeViewersButton;
+    private final JButton aboutButton;
     private final List<NodeViewersChangeListener> listeners = new ArrayList<NodeViewersChangeListener>();
     {
         listeners.add(this);
@@ -58,10 +62,8 @@ public class ZooInspectorPanel extends JPanel implements
      * @param zooInspectorManager
      *            - the {@link ZooInspectorManager} for the application
      */
-    public ZooInspectorPanel(final ZooInspectorManager zooInspectorManager, final IconResource iconResource) {
+    public ZooInspectorPanel(final ZooInspectorManager zooInspectorManager) {
         this.zooInspectorManager = zooInspectorManager;
-        this.iconResource = iconResource;
-        toolbar = new Toolbar(iconResource);
         final ArrayList<ZooInspectorNodeViewer> nodeViewers = new ArrayList<ZooInspectorNodeViewer>();
         try {
             List<String> defaultNodeViewersClassNames = this.zooInspectorManager
@@ -80,10 +82,43 @@ public class ZooInspectorPanel extends JPanel implements
         nodeViewersPanel = new ZooInspectorNodeViewersPanel(
                 zooInspectorManager, nodeViewers);
         treeViewer = new ZooInspectorTreeViewer(zooInspectorManager,
-                nodeViewersPanel, iconResource);
+                nodeViewersPanel);
         this.setLayout(new BorderLayout());
-        
-        toolbar.addActionListener(Toolbar.Button.connect, new ActionListener() {
+        JToolBar toolbar = new JToolBar();
+        toolbar.setFloatable(false);
+        connectButton = new JButton(ZooInspectorIconResources.getConnectIcon());
+        disconnectButton = new JButton(ZooInspectorIconResources
+                .getDisconnectIcon());
+        refreshButton = new JButton(ZooInspectorIconResources.getRefreshIcon());
+        addNodeButton = new JButton(ZooInspectorIconResources.getAddNodeIcon());
+        deleteNodeButton = new JButton(ZooInspectorIconResources
+                .getDeleteNodeIcon());
+        nodeViewersButton = new JButton(ZooInspectorIconResources
+                .getChangeNodeViewersIcon());
+        aboutButton = new JButton(ZooInspectorIconResources
+                .getInformationIcon());
+        toolbar.add(connectButton);
+        toolbar.add(disconnectButton);
+        toolbar.add(refreshButton);
+        toolbar.add(addNodeButton);
+        toolbar.add(deleteNodeButton);
+        toolbar.add(nodeViewersButton);
+        toolbar.add(aboutButton);
+        aboutButton.setEnabled(true);
+        connectButton.setEnabled(true);
+        disconnectButton.setEnabled(false);
+        refreshButton.setEnabled(false);
+        addNodeButton.setEnabled(false);
+        deleteNodeButton.setEnabled(false);
+        nodeViewersButton.setEnabled(true);
+        nodeViewersButton.setToolTipText("Change Node Viewers");
+        aboutButton.setToolTipText("About ZooInspector");
+        connectButton.setToolTipText("Connect");
+        disconnectButton.setToolTipText("Disconnect");
+        refreshButton.setToolTipText("Refresh");
+        addNodeButton.setToolTipText("Add Node");
+        deleteNodeButton.setToolTipText("Delete Node");
+        connectButton.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 ZooInspectorConnectionPropertiesDialog zicpd = new ZooInspectorConnectionPropertiesDialog(
                         zooInspectorManager.getLastConnectionProps(),
@@ -92,17 +127,17 @@ public class ZooInspectorPanel extends JPanel implements
                 zicpd.setVisible(true);
             }
         });
-        toolbar.addActionListener(Toolbar.Button.disconnect, new ActionListener() {
+        disconnectButton.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 disconnect();
             }
         });
-        toolbar.addActionListener(Toolbar.Button.refresh, new ActionListener() {
+        refreshButton.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 treeViewer.refreshView();
             }
         });
-        toolbar.addActionListener(Toolbar.Button.addNode, new ActionListener() {
+        addNodeButton.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 final List<String> selectedNodes = treeViewer
                         .getSelectedNodes();
@@ -134,7 +169,7 @@ public class ZooInspectorPanel extends JPanel implements
                 }
             }
         });
-        toolbar.addActionListener(Toolbar.Button.deleteNode, new ActionListener() {
+        deleteNodeButton.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 final List<String> selectedNodes = treeViewer
                         .getSelectedNodes();
@@ -170,19 +205,19 @@ public class ZooInspectorPanel extends JPanel implements
                 }
             }
         });
-        toolbar.addActionListener(Toolbar.Button.nodeViewers, new ActionListener() {
+        nodeViewersButton.addActionListener(new ActionListener() {
 
             public void actionPerformed(ActionEvent e) {
                 ZooInspectorNodeViewersDialog nvd = new ZooInspectorNodeViewersDialog(
                         JOptionPane.getRootFrame(), nodeViewers, listeners,
-                        zooInspectorManager, iconResource);
+                        zooInspectorManager);
                 nvd.setVisible(true);
             }
         });
-        toolbar.addActionListener(Toolbar.Button.about, new ActionListener() {
+        aboutButton.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 ZooInspectorAboutDialog zicpd = new ZooInspectorAboutDialog(
-                        JOptionPane.getRootFrame(), iconResource);
+                        JOptionPane.getRootFrame());
                 zicpd.setVisible(true);
             }
         });
@@ -191,7 +226,7 @@ public class ZooInspectorPanel extends JPanel implements
                 treeScroller, nodeViewersPanel);
         splitPane.setResizeWeight(0.25);
         this.add(splitPane, BorderLayout.CENTER);
-        this.add(toolbar.getJToolBar(), BorderLayout.NORTH);
+        this.add(toolbar, BorderLayout.NORTH);
     }
 
     /**
@@ -213,7 +248,11 @@ public class ZooInspectorPanel extends JPanel implements
                 try {
                     if (get()) {
                         treeViewer.refreshView();
-                        toolbar.toggleButtons(true);
+                        connectButton.setEnabled(false);
+                        disconnectButton.setEnabled(true);
+                        refreshButton.setEnabled(true);
+                        addNodeButton.setEnabled(true);
+                        deleteNodeButton.setEnabled(true);
                     } else {
                         JOptionPane.showMessageDialog(ZooInspectorPanel.this,
                                 "Unable to connect to zookeeper", "Error",
@@ -263,7 +302,11 @@ public class ZooInspectorPanel extends JPanel implements
                 try {
                     if (get()) {
                         treeViewer.clearView();
-                        toolbar.toggleButtons(false);
+                        connectButton.setEnabled(true);
+                        disconnectButton.setEnabled(false);
+                        refreshButton.setEnabled(false);
+                        addNodeButton.setEnabled(false);
+                        deleteNodeButton.setEnabled(false);
                     }
                 } catch (InterruptedException e) {
                     LoggerFactory

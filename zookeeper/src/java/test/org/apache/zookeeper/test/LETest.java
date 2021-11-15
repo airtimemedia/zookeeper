@@ -35,7 +35,6 @@ import org.apache.zookeeper.server.quorum.QuorumPeer.QuorumServer;
 import org.junit.Assert;
 import org.junit.Test;
 
-@SuppressWarnings("deprecation")
 public class LETest extends ZKTestCase {
     private static final Logger LOG = LoggerFactory.getLogger(LETest.class);
     volatile Vote votes[];

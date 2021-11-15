@@ -47,6 +47,7 @@ import org.apache.zookeeper.server.ZooKeeperServer;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 public class SessionTest extends ZKTestCase {
@@ -54,7 +55,7 @@ public class SessionTest extends ZKTestCase {
 
     private static final String HOSTPORT = "127.0.0.1:" +
             PortAssignment.unique();
-
+    
     private ServerCnxnFactory serverFactory;
     private ZooKeeperServer zs;
 
@@ -218,7 +219,7 @@ public class SessionTest extends ZKTestCase {
             zk.getData("/e", false, stat);
             Assert.fail("Should have received a SessionExpiredException");
         } catch(KeeperException.SessionExpiredException e) {}
-
+        
         AsyncCallback.DataCallback cb = new AsyncCallback.DataCallback() {
             String status = "not done";
             public void processResult(int rc, String p, Object c, byte[] b, Stat s) {
@@ -232,7 +233,7 @@ public class SessionTest extends ZKTestCase {
                 cb.wait(1000);
             }
         }
-        Assert.assertEquals(KeeperException.Code.SESSIONEXPIRED.toString(), cb.toString());
+        Assert.assertEquals(KeeperException.Code.SESSIONEXPIRED.toString(), cb.toString());        
     }
 
     private List<Thread> findThreads(String name) {
@@ -251,7 +252,6 @@ public class SessionTest extends ZKTestCase {
     /**
      * Make sure ephemerals get cleaned up when a session times out.
      */
-    @SuppressWarnings("deprecation")
     @Test
     public void testSessionTimeout() throws Exception {
         final int TIMEOUT = 5000;

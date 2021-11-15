@@ -1,5 +1,6 @@
 # Copyright Airtime Media 2021
 project(at_zookeeper_c)
+cmake_minimum_required(VERSION 3.12.0)
 
 set(ZK_C_API_SOURCES
   # headers

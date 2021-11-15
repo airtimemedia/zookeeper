@@ -21,24 +21,10 @@
 # We use ZOOCFGDIR if defined,
 # otherwise we use /etc/zookeeper
 # or the conf directory that is
-# a sibling of this script's directory.
-# Or you can specify the ZOOCFGDIR using the
-# '--config' option in the command line.
+# a sibling of this script's directory
 
 ZOOBINDIR="${ZOOBINDIR:-/usr/bin}"
 ZOOKEEPER_PREFIX="${ZOOBINDIR}/.."
-
-#check to see if the conf dir is given as an optional argument
-if [ $# -gt 1 ]
-then
-    if [ "--config" = "$1" ]
-	  then
-	      shift
-	      confdir=$1
-	      shift
-	      ZOOCFGDIR=$confdir
-    fi
-fi
 
 if [ "x$ZOOCFGDIR" = "x" ]
 then
@@ -67,7 +53,7 @@ fi
 
 if [ "x${ZOO_LOG_DIR}" = "x" ]
 then
-    ZOO_LOG_DIR="$ZOOKEEPER_PREFIX/logs"
+    ZOO_LOG_DIR="."
 fi
 
 if [ "x${ZOO_LOG4J_PROP}" = "x" ]
@@ -75,13 +61,10 @@ then
     ZOO_LOG4J_PROP="INFO,CONSOLE"
 fi
 
-if [[ -n "$JAVA_HOME" ]] && [[ -x "$JAVA_HOME/bin/java" ]];  then
-    JAVA="$JAVA_HOME/bin/java"
-elif type -p java; then
-    JAVA=java
+if [ "$JAVA_HOME" != "" ]; then
+  JAVA="$JAVA_HOME/bin/java"
 else
-    echo "Error: JAVA_HOME is not set and java could not be found in PATH." 1>&2
-    exit 1
+  JAVA=java
 fi
 
 #add the zoocfg dir to classpath
@@ -94,7 +77,7 @@ done
 
 #make it work in the binary package
 #(use array for LIBPATH to account for spaces within wildcard expansion)
-if ls "${ZOOKEEPER_PREFIX}"/share/zookeeper/zookeeper-*.jar > /dev/null 2>&1; then 
+if [ -e "${ZOOKEEPER_PREFIX}"/share/zookeeper/zookeeper-*.jar ]; then
   LIBPATH=("${ZOOKEEPER_PREFIX}"/share/zookeeper/*.jar)
 else
   #release tarball format
@@ -130,11 +113,3 @@ then
 fi
 
 #echo "CLASSPATH=$CLASSPATH"
-
-# default heap for zookeeper server
-ZK_SERVER_HEAP="${ZK_SERVER_HEAP:-1000}"
-export SERVER_JVMFLAGS="-Xmx${ZK_SERVER_HEAP}m $SERVER_JVMFLAGS"
-
-# default heap for zookeeper client
-ZK_CLIENT_HEAP="${ZK_CLIENT_HEAP:-256}"
-export CLIENT_JVMFLAGS="-Xmx${ZK_CLIENT_HEAP}m $CLIENT_JVMFLAGS"

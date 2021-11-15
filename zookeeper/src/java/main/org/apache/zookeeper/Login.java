@@ -18,7 +18,7 @@
 
 package org.apache.zookeeper;
 
-/**
+/** 
  * This class is responsible for refreshing Kerberos credentials for
  * logins for both Zookeeper client and server.
  * See ZooKeeperSaslServer for server-side usage.
@@ -34,8 +34,6 @@ import javax.security.auth.callback.CallbackHandler;
 
 import org.apache.log4j.Logger;
 import org.apache.zookeeper.client.ZooKeeperSaslClient;
-import org.apache.zookeeper.common.Time;
-
 import javax.security.auth.kerberos.KerberosTicket;
 import javax.security.auth.Subject;
 import java.util.Date;
@@ -43,7 +41,7 @@ import java.util.Random;
 import java.util.Set;
 
 public class Login {
-    private static final Logger LOG = Logger.getLogger(Login.class);
+    Logger LOG = Logger.getLogger(Login.class);
     public CallbackHandler callbackHandler;
 
     // LoginThread will sleep until 80% of time from last refresh to
@@ -65,16 +63,17 @@ public class Login {
     private Thread t = null;
     private boolean isKrbTicket = false;
     private boolean isUsingTicketCache = false;
+    private boolean isUsingKeytab = false;
 
     /** Random number generator */
     private static Random rng = new Random();
 
     private LoginContext login = null;
     private String loginContextName = null;
+    private String keytabFile = null;
     private String principal = null;
 
-    // Initialize 'lastLogin' to do a login at first time
-    private long lastLogin = Time.currentElapsedTime() - MIN_TIME_BEFORE_RELOGIN;
+    private long lastLogin = 0;
 
     /**
      * LoginThread constructor. The constructor starts the thread used
@@ -104,6 +103,10 @@ public class Login {
                     isUsingTicketCache = true;
                 }
             }
+            if (entry.getOptions().get("keyTab") != null) {
+                keytabFile = (String)entry.getOptions().get("keyTab");
+                isUsingKeytab = true;
+            }
             if (entry.getOptions().get("principal") != null) {
                 principal = (String)entry.getOptions().get("principal");
             }
@@ -124,7 +127,7 @@ public class Login {
                 LOG.info("TGT refresh thread started.");
                 while (true) {  // renewal thread's main loop. if it exits from here, thread will exit.
                     KerberosTicket tgt = getTGT();
-                    long now = Time.currentWallTime();
+                    long now = System.currentTimeMillis();
                     long nextRefresh;
                     Date nextRefreshDate;
                     if (tgt == null) {
@@ -301,7 +304,7 @@ public class Login {
                 (TICKET_RENEW_WINDOW + (TICKET_RENEW_JITTER * rng.nextDouble())));
         if (proposedRefresh > expires) {
             // proposedRefresh is too far in the future: it's after ticket expires: simply return now.
-            return Time.currentWallTime();
+            return System.currentTimeMillis();
         }
         else {
             return proposedRefresh;
@@ -321,7 +324,7 @@ public class Login {
     }
 
     private boolean hasSufficientTimeElapsed() {
-        long now = Time.currentElapsedTime();
+        long now = System.currentTimeMillis();
         if (now - getLastLogin() < MIN_TIME_BEFORE_RELOGIN ) {
             LOG.warn("Not attempting to re-login since the last re-login was " +
                     "attempted less than " + (MIN_TIME_BEFORE_RELOGIN/1000) + " seconds"+

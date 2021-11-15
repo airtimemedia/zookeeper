@@ -155,9 +155,10 @@ public abstract class Op {
      * @return An appropriate Record structure.
      */
     public abstract Record toRequestRecord() ;
-    
+
     /**
      * Reconstructs the transaction with the chroot prefix.
+     * 
      * @return transaction with chroot.
      */
     abstract Op withChroot(String addRootPrefix);
@@ -183,18 +184,14 @@ public abstract class Op {
         private int flags;
 
         private Create(String path, byte[] data, List<ACL> acl, int flags) {
-            super(getOpcode(CreateMode.fromFlag(flags, CreateMode.PERSISTENT)), path);
+            super(ZooDefs.OpCode.create, path);
             this.data = data;
             this.acl = acl;
             this.flags = flags;
         }
 
-        private static int getOpcode(CreateMode createMode) {
-            return createMode.isContainer() ? ZooDefs.OpCode.createContainer : ZooDefs.OpCode.create;
-        }
-
         private Create(String path, byte[] data, List<ACL> acl, CreateMode createMode) {
-            super(getOpcode(createMode), path);
+            super(ZooDefs.OpCode.create, path);
             this.data = data;
             this.acl = acl;
             this.flags = createMode.toFlag();
@@ -351,5 +348,4 @@ public abstract class Op {
             return new Check(path, version);
         }
     }
-
 }

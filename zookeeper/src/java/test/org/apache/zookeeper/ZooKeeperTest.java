@@ -27,8 +27,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.zookeeper.AsyncCallback.VoidCallback;
 import org.apache.zookeeper.ZooDefs.Ids;
-import org.apache.zookeeper.cli.LsCommand;
-import org.apache.zookeeper.data.Stat;
 import org.apache.zookeeper.test.ClientBase;
 import org.junit.Assert;
 import org.junit.Test;
@@ -71,16 +69,7 @@ public class ZooKeeperTest extends ClientBase {
         Assert.assertTrue(children.contains("b"));
         Assert.assertTrue(children.contains("c"));
 
-        ZooKeeperMain zkMain = new ZooKeeperMain(zk);
-        // 'rmr' is deprecated, so the test here is just for backwards
-        // compatibility.
-        String cmdstring0 = "rmr /a/b/v";
-        String cmdstring1 = "deleteall /a";
-        zkMain.cl.parseCommand(cmdstring0);
-        Assert.assertFalse(zkMain.processZKCmd(zkMain.cl));
-        Assert.assertEquals(null, zk.exists("/a/b/v", null));
-        zkMain.cl.parseCommand(cmdstring1);
-        Assert.assertFalse(zkMain.processZKCmd(zkMain.cl));
+        ZKUtil.deleteRecursive(zk, "/a");
         Assert.assertNull(zk.exists("/a", null));
     }
 
@@ -165,162 +154,6 @@ public class ZooKeeperTest extends ClientBase {
     }
 
     @Test
-    public void testInvalidCommand() throws Exception {
-        final ZooKeeper zk = createClient();
-        ZooKeeperMain zkMain = new ZooKeeperMain(zk);
-        String cmdstring = "cret -s /node1";
-        zkMain.cl.parseCommand(cmdstring);
-        Assert.assertFalse("Doesn't validate the command", zkMain
-                .processZKCmd(zkMain.cl));
-    }
-
-    @Test
-    public void testCreateCommandWithoutPath() throws Exception {
-        final ZooKeeper zk = createClient();
-        ZooKeeperMain zkMain = new ZooKeeperMain(zk);
-        String cmdstring = "create ";
-        zkMain.cl.parseCommand(cmdstring);
-        Assert.assertFalse("Path is not validated.", zkMain
-                .processZKCmd(zkMain.cl));
-        // create ephemeral
-        cmdstring = "create -e ";
-        zkMain.cl.parseCommand(cmdstring);
-        Assert.assertFalse("Path is not validated.", zkMain
-                .processZKCmd(zkMain.cl));
-        // create sequential
-        cmdstring = "create -s ";
-        zkMain.cl.parseCommand(cmdstring);
-        Assert.assertFalse("Path is not validated.", zkMain
-                .processZKCmd(zkMain.cl));
-        // create ephemeral sequential
-        cmdstring = "create -s -e ";
-        zkMain.cl.parseCommand(cmdstring);
-        Assert.assertFalse("Path is not validated.", zkMain
-                .processZKCmd(zkMain.cl));
-    }
-
-    @Test
-    public void testCreateNodeWithoutData() throws Exception {
-        final ZooKeeper zk = createClient();
-        ZooKeeperMain zkMain = new ZooKeeperMain(zk);
-        // create persistent sequential node
-        String cmdstring = "create -s /node ";
-        zkMain.cl.parseCommand(cmdstring);
-        Assert.assertTrue("Doesn't create node without data", zkMain
-                .processZKCmd(zkMain.cl));
-        // create ephemeral node
-        cmdstring = "create  -e /node ";
-        zkMain.cl.parseCommand(cmdstring);
-        Assert.assertTrue("Doesn't create node without data", zkMain
-                .processZKCmd(zkMain.cl));
-        // create ephemeral sequential node
-        cmdstring = "create -s -e /node ";
-        zkMain.cl.parseCommand(cmdstring);
-        Assert.assertTrue("Doesn't create node without data", zkMain
-                .processZKCmd(zkMain.cl));
-        // creating ephemeral with wrong option.
-        cmdstring = "create -s y /node";
-        zkMain.cl.parseCommand(cmdstring);
-        try {
-            Assert.assertTrue("Created node with wrong option", zkMain
-                    .processZKCmd(zkMain.cl));
-            Assert.fail("Created the node with wrong option should "
-                    + "throw Exception.");
-        } catch (IllegalArgumentException e) {
-            Assert.assertEquals("Path must start with / character", e
-                    .getMessage());
-        }
-    }
-
-    @Test
-    public void testACLWithExtraAgruments() throws Exception {
-        final ZooKeeper zk = createClient();
-        ZooKeeperMain zkMain = new ZooKeeperMain(zk);
-        // create persistent sequential node
-        String cmdstring = "create -s /l data ip:10.18.52.144:cdrwa f g h";
-        zkMain.cl.parseCommand(cmdstring);
-        Assert.assertTrue(
-                "Not considering the extra arguments after the acls.", zkMain
-                        .processZKCmd(zkMain.cl));
-    }
-
-    @Test
-    public void testCreatePersistentNode() throws Exception {
-        final ZooKeeper zk = createClient();
-        ZooKeeperMain zkMain = new ZooKeeperMain(zk);
-        String cmdstring = "create /node2";
-        zkMain.cl.parseCommand(cmdstring);
-        Assert.assertTrue("Not creating Persistent node.", zkMain
-                .processZKCmd(zkMain.cl));
-    }
-
-    @Test
-    public void testDelete() throws Exception {
-        final ZooKeeper zk = createClient();
-        ZooKeeperMain zkMain = new ZooKeeperMain(zk);
-        String cmdstring1 = "create -e /node2 data";
-        String cmdstring2 = "delete /node2";
-        String cmdstring3 = "ls /node2";
-        zkMain.cl.parseCommand(cmdstring1);
-        Assert.assertTrue(zkMain.processZKCmd(zkMain.cl));
-        zkMain.cl.parseCommand(cmdstring2);
-        Assert.assertFalse(zkMain.processZKCmd(zkMain.cl));
-        zkMain.cl.parseCommand(cmdstring3);
-        Assert.assertFalse("", zkMain.processCmd(zkMain.cl));
-    }
-
-    @Test
-    public void testStatCommand() throws Exception {
-        final ZooKeeper zk = createClient();
-        ZooKeeperMain zkMain = new ZooKeeperMain(zk);
-        String cmdstring1 = "create -e /node3 data";
-        String cmdstring2 = "stat /node3";
-        String cmdstring3 = "delete /node3";
-        zkMain.cl.parseCommand(cmdstring1);
-        Assert.assertTrue(zkMain.processZKCmd(zkMain.cl));
-        zkMain.cl.parseCommand(cmdstring2);
-        Assert.assertFalse(zkMain.processZKCmd(zkMain.cl));
-        zkMain.cl.parseCommand(cmdstring3);
-        Assert.assertFalse(zkMain.processZKCmd(zkMain.cl));
-    }
-
-    @Test
-    public void testInvalidStatCommand() throws Exception {
-        final ZooKeeper zk = createClient();
-        ZooKeeperMain zkMain = new ZooKeeperMain(zk);
-        // node doesn't exists
-        String cmdstring1 = "stat /node123";
-        zkMain.cl.parseCommand(cmdstring1);
-        try {
-            Assert.assertFalse(zkMain.processZKCmd(zkMain.cl));
-            Assert.fail("Path doesn't exists so, command should fail.");
-        } catch (KeeperException e) {
-            Assert.assertEquals(KeeperException.Code.NONODE, e.code());
-        }
-    }
-
-    @Test
-    public void testSetData() throws Exception {
-        final ZooKeeper zk = createClient();
-        ZooKeeperMain zkMain = new ZooKeeperMain(zk);
-        String cmdstring1 = "create -e /node4 data";
-        String cmdstring2 = "set /node4 " + "data";
-        String cmdstring3 = "delete /node4";
-        Stat stat = new Stat();
-        int version = 0;
-        zkMain.cl.parseCommand(cmdstring1);
-        Assert.assertTrue(zkMain.processZKCmd(zkMain.cl));
-        stat = zk.exists("/node4", true);
-        version = stat.getVersion();
-        zkMain.cl.parseCommand(cmdstring2);
-        Assert.assertFalse(zkMain.processZKCmd(zkMain.cl));
-        stat = zk.exists("/node4", true);
-        Assert.assertEquals(version + 1, stat.getVersion());
-        zkMain.cl.parseCommand(cmdstring3);
-        Assert.assertFalse(zkMain.processZKCmd(zkMain.cl));
-    }
-
-    @Test
     public void testCheckInvalidAcls() throws Exception {
          final ZooKeeper zk = createClient();
             ZooKeeperMain zkMain = new ZooKeeperMain(zk);
@@ -349,47 +182,23 @@ public class ZooKeeperTest extends ClientBase {
 
     @Test
     public void testCliCommandsNotEchoingUsage() throws Exception {
-        // setup redirect out/err streams to get System.in/err, use this judiciously!
-        final PrintStream systemErr = System.err; // get current err
-        final ByteArrayOutputStream errContent = new ByteArrayOutputStream();
-        System.setErr(new PrintStream(errContent));
-        final ZooKeeper zk = createClient();
-        ZooKeeperMain zkMain = new ZooKeeperMain(zk);
-        String cmd1 = "printwatches";
-        zkMain.executeLine(cmd1);
-        String cmd2 = "history";
-        zkMain.executeLine(cmd2);
-        String cmd3 = "redo";
-        zkMain.executeLine(cmd3);
-        // revert redirect of out/err streams - important step!
-        System.setErr(systemErr);
-        if (errContent.toString().contains("ZooKeeper -server host:port cmd args")) {
-            fail("CLI commands (history, redo, connect, printwatches) display usage info!");
-        }
-    }
-
-    @Test
-    public void testSortedLs() throws Exception {
-        final ZooKeeper zk = createClient();
-        ZooKeeperMain zkMain = new ZooKeeperMain(zk);
-
-        zkMain.executeLine("create /aa1");
-        zkMain.executeLine("create /aa2");
-        zkMain.executeLine("create /aa3");
-        zkMain.executeLine("create /test1");
-        zkMain.executeLine("create /zk1");
-
-        // call ls and put result in byteStream
-        ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
-        PrintStream out = new PrintStream(byteStream);
-        String lsCmd = "ls /";
-        LsCommand entity = new LsCommand();
-        entity.setZk(zk);
-        entity.setOut(out);
-        entity.parse(lsCmd.split(" ")).exec();
-
-        String result = byteStream.toString();
-        assertTrue(result, result.contains("[aa1, aa2, aa3, test1, zk1, zookeeper]"));
+            // setup redirect out/err streams to get System.in/err, use this judiciously!
+           final PrintStream systemErr = System.err; // get current err
+           final ByteArrayOutputStream errContent = new ByteArrayOutputStream();
+           System.setErr(new PrintStream(errContent));
+           final ZooKeeper zk = createClient();
+           ZooKeeperMain zkMain = new ZooKeeperMain(zk);
+           String cmd1 = "printwatches";
+           zkMain.executeLine(cmd1);
+           String cmd2 = "history";
+           zkMain.executeLine(cmd2);
+           String cmd3 = "redo";
+           zkMain.executeLine(cmd3);
+           // revert redirect of out/err streams - important step!
+           System.setErr(systemErr);
+           if (errContent.toString().contains("ZooKeeper -server host:port cmd args")) {
+                fail("CLI commands (history, redo, connect, printwatches) display usage info!");
+            }
     }
 
 }

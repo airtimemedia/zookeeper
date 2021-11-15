@@ -30,7 +30,6 @@ import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 import org.apache.zookeeper.ZKTestCase;
 import org.apache.zookeeper.ZooKeeper;
-import org.apache.zookeeper.common.PathUtils;
 import org.apache.zookeeper.test.ClientBase;
 import org.junit.Assert;
 import org.junit.Test;
@@ -64,7 +63,11 @@ public class InvalidSnapCountTest extends ZKTestCase implements Watcher {
             }
             
             // Convert windows path to UNIX to avoid problems with "\"
-            String dir = PathUtils.normalizeFileSystemPath(dataDir.toString());
+            String dir = dataDir.toString();
+            String osname = java.lang.System.getProperty("os.name");
+            if (osname.toLowerCase().contains("windows")) {
+                dir = dir.replace('\\', '/');
+            }
             fwriter.write("dataDir=" + dir + "\n");
             
             fwriter.write("clientPort=" + clientPort + "\n");

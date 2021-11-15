@@ -10,8 +10,8 @@
        In particular we want to make sure we exit if this occurs
        Also notice logged as fatal error -->
   <Match>
-    <Class name="org.apache.zookeeper.server.ZooKeeperCriticalThread" />
-    <Method name="handleException" />
+    <Class name="org.apache.zookeeper.server.SyncRequestProcessor" />
+    <Method name="run" />
     <Bug pattern="DM_EXIT" />
   </Match>
 
@@ -129,19 +129,6 @@
     <Class name="org.apache.zookeeper.server.quorum.QuorumPeer"/>
     <Bug pattern="OS_OPEN_STREAM" />
     <Method name="writeLongToFile" />
-  </Match>
-
-  <!-- this is a helper routine to wakeup the main thread with the
-  state change happening in the routines that call it -->
-  <Match>
-    <Class name="org.apache.zookeeper.server.quorum.CommitProcessor"/>
-    <Bug pattern="NN_NAKED_NOTIFY" />
-    <Method name="wakeup" />
-  </Match>
-
-  <!-- Disable encoding warnings -->
-  <Match>
-    <Bug pattern="DM_DEFAULT_ENCODING" />
   </Match>
 
 </FindBugsFilter>
