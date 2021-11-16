@@ -3,7 +3,7 @@ Files in this directory are hand-generated
 ---------------------------------------
 - zookeeper.jute.h zookeeper.jute.c
 
-cd at-deps/third_party/zookeeper/zookeeper
+cd ..
 ant compile_jute
 
 Note: You need to have ant installed.
@@ -11,7 +11,7 @@ Note: You need to have ant installed.
 ---------------------------------------
 - config.h
 
-cd at-deps/third_party/zookeeper/zookeeper/src/c
+cd ../src/c
 autoreconf -if
 ./configure
 
