@@ -41,6 +41,10 @@ target_compile_definitions(at_zookeeper_c PUBLIC
  THREADED
 )
 
+target_compile_options(at_zookeeper_c PUBLIC
+  -Wno-asm-operand-widths
+)
+
 target_include_directories(at_zookeeper_c
   PUBLIC ${PROJECT_SOURCE_DIR}/../src/c/include
   PUBLIC ${PROJECT_SOURCE_DIR}/../generated
